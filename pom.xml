@@ -7,7 +7,7 @@
     <parent>
         <groupId>io.confluent</groupId>
         <artifactId>rest-utils-parent</artifactId>
-        <version>[8.3.0-0, 8.3.1-0)</version>
+        <version>8.1.1</version>
     </parent>
 
     <artifactId>kafka-streams-examples</artifactId>
@@ -57,6 +57,8 @@
         <java.version>17</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <scalatest.version>3.1.2</scalatest.version>
+        <kafka.version>4.0.0</kafka.version>
+        <kafka.scala.version>2.13</kafka.scala.version>
         <!-- The default is ubi9 -->
         <docker.os_type>ubi9</docker.os_type>
         <!-- Need to explicitly set this otherwise it will be overridden from common-docker pom. -->
@@ -100,8 +102,13 @@
         </dependency>
         <dependency>
             <groupId>org.apache.kafka</groupId>
-            <artifactId>kafka-streams-scala_${kafka.scala.version}</artifactId>
+            <artifactId>kafka-streams-scala_2.13</artifactId>
             <version>${kafka.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.rocksdb</groupId>
+            <artifactId>rocksdbjni</artifactId>
+            <version>9.7.3</version>
         </dependency>
         <dependency>
             <groupId>org.apache.avro</groupId>
