@@ -42,8 +42,11 @@ public class AddInventory {
             productSerde.serializer(),
             Serdes.Integer().serializer())) {
             for (final KeyValue<Product, Integer> kv : inventory) {
-                stockProducer.send(new ProducerRecord<>(topic.name(), kv.key, kv.value))
-                             .get();
+                final org.apache.kafka.clients.producer.RecordMetadata metadata =
+                    stockProducer.send(new ProducerRecord<>(topic.name(), kv.key, kv.value)).get();
+                System.out.printf(
+                    "[AddInventory] Produced inventory topic=%s partition=%d offset=%d product=%s quantity=%s%n",
+                    metadata.topic(), metadata.partition(), metadata.offset(), kv.key, kv.value);
             }
         } catch (final InterruptedException | ExecutionException e) {
             e.printStackTrace();
@@ -86,6 +89,8 @@ public class AddInventory {
                     }
                 })
                 .orElse(new Properties());
+
+        registerDifcClient("AddInventory", bootstrapServers, defaultConfig);
 
         // Send Inventory
         final List<KeyValue<Product, Integer>> inventory = asList(

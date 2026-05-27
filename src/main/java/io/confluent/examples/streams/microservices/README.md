@@ -24,6 +24,8 @@ There is a simple service that sends emails and does dynamic routing.
 
 ## Getting Started
 
+SASL/SCRAM configs (one Kafka principal per service): see `config/security/README.md` at the repo root.
+
 As a great introduction for developers who are just getting started with stream processing, refer to the free, self-paced [Kafka Streams tutorial](https://docs.confluent.io/current/tutorials/examples/microservices-orders/docs/index.html#tutorial-microservices-orders).
 The tutorial centers on this microservices ecosystem in this GitHub repo, and it correlates streaming concepts to hands-on exercises.
 You’ll learn the basics of the Kafka Streams API and common patterns to design and build event-driven applications.

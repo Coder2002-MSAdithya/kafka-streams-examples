@@ -7,9 +7,12 @@ import io.confluent.examples.streams.microservices.domain.Schemas;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.message.CreateTagResponseData;
+import org.apache.kafka.common.message.RegisterClientResponseData;
 import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.common.serialization.Serializer;
+import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.state.RocksDBConfigSetter;
 import org.eclipse.jetty.server.Server;
@@ -200,6 +203,48 @@ public class MicroserviceUtils {
     return new KafkaProducer<>(producerConfig,
         topic.keySerde().serializer(),
         topic.valueSerde().serializer());
+  }
+
+  public static void registerDifcClient(final String serviceName,
+                                        final String bootstrapServers,
+                                        final Properties defaultConfig) {
+    final Properties producerConfig = new Properties();
+    producerConfig.putAll(defaultConfig);
+    producerConfig.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+    producerConfig.put(ProducerConfig.CLIENT_ID_CONFIG, serviceName + "-difc-registrar");
+
+    try (KafkaProducer<String, String> registrar = new KafkaProducer<>(
+        producerConfig,
+        new StringSerializer(),
+        new StringSerializer())) {
+      final RegisterClientResponseData response = registrar.registerClient();
+      System.out.printf("[DIFC] registerClient service=%s errorCode=%d message=%s%n",
+          serviceName,
+          response.errorCode(),
+          response.errorMessage());
+    }
+  }
+
+  public static void createDifcTag(final String serviceName,
+                                   final String tagName,
+                                   final String bootstrapServers,
+                                   final Properties defaultConfig) {
+    final Properties producerConfig = new Properties();
+    producerConfig.putAll(defaultConfig);
+    producerConfig.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+    producerConfig.put(ProducerConfig.CLIENT_ID_CONFIG, serviceName + "-difc-tag-creator");
+
+    try (KafkaProducer<String, String> registrar = new KafkaProducer<>(
+        producerConfig,
+        new StringSerializer(),
+        new StringSerializer())) {
+      final CreateTagResponseData response = registrar.createTag(tagName);
+      System.out.printf("[DIFC] createTag service=%s tag=%s errorCode=%d message=%s%n",
+          serviceName,
+          tagName,
+          response.errorCode(),
+          response.errorMessage());
+    }
   }
 
   public static void addShutdownHookAndBlock(final Service service) throws InterruptedException {

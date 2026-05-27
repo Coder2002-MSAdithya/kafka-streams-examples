@@ -55,6 +55,8 @@ public class FraudService implements Service {
                     final Properties defaultConfig) {
     streams = processStreams(bootstrapServers, stateDir, defaultConfig);
     streams.cleanUp(); //don't do this in prod as it clears your state stores
+    registerDifcClient(SERVICE_APP_ID, bootstrapServers, defaultConfig);
+    createDifcTag(SERVICE_APP_ID, "fraud", bootstrapServers, defaultConfig);
     final CountDownLatch startLatch = new CountDownLatch(1);
     streams.setStateListener((newState, oldState) -> {
       if (newState == State.RUNNING && oldState != KafkaStreams.State.RUNNING) {
@@ -83,7 +85,10 @@ public class FraudService implements Service {
     final StreamsBuilder builder = new StreamsBuilder();
     final KStream<String, Order> orders = builder
         .stream(ORDERS.name(), Consumed.with(ORDERS.keySerde(), ORDERS.valueSerde()))
-        .filter((id, order) -> OrderState.CREATED.equals(order.getState()));
+        .filter((id, order) -> OrderState.CREATED.equals(order.getState()))
+        .peek((id, order) -> System.out.printf(
+            "[FraudService] Received CREATED order id=%s customer=%s product=%s quantity=%s price=%s%n",
+            id, order.getCustomerId(), order.getProduct(), order.getQuantity(), order.getPrice()));
 
     //Create an aggregate of the total value by customer and hold it with the order. We use session windows to
     // detect periods of activity.
@@ -109,13 +114,21 @@ public class FraudService implements Service {
         .branch((id, orderValue) -> orderValue.getValue() < FRAUD_LIMIT, Branched.as("below"))
         .noDefaultBranch();
 
-    forks.get("limit-above").mapValues(
-        orderValue -> new OrderValidation(orderValue.getOrder().getId(), FRAUD_CHECK, FAIL))
+    forks.get("limit-above").mapValues(orderValue -> {
+      final OrderValidation validation = new OrderValidation(orderValue.getOrder().getId(), FRAUD_CHECK, FAIL);
+      System.out.printf("[FraudService] Emitting validation orderId=%s type=%s result=%s total=%s%n",
+          validation.getOrderId(), validation.getCheckType(), validation.getValidationResult(), orderValue.getValue());
+      return validation;
+    })
         .to(ORDER_VALIDATIONS.name(), Produced
             .with(ORDER_VALIDATIONS.keySerde(), ORDER_VALIDATIONS.valueSerde()));
 
-    forks.get("limit-below").mapValues(
-        orderValue -> new OrderValidation(orderValue.getOrder().getId(), FRAUD_CHECK, PASS))
+    forks.get("limit-below").mapValues(orderValue -> {
+      final OrderValidation validation = new OrderValidation(orderValue.getOrder().getId(), FRAUD_CHECK, PASS);
+      System.out.printf("[FraudService] Emitting validation orderId=%s type=%s result=%s total=%s%n",
+          validation.getOrderId(), validation.getCheckType(), validation.getValidationResult(), orderValue.getValue());
+      return validation;
+    })
         .to(ORDER_VALIDATIONS.name(), Produced
             .with(ORDER_VALIDATIONS.keySerde(), ORDER_VALIDATIONS.valueSerde()));
 

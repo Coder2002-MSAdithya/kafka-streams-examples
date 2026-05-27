@@ -62,6 +62,8 @@ public class OrderDetailsService implements Service {
   public void start(final String bootstrapServers,
                     final String stateDir,
                     final Properties defaultConfig) {
+    registerDifcClient(getClass().getSimpleName(), bootstrapServers, defaultConfig);
+    createDifcTag(getClass().getSimpleName(), "order-valid", bootstrapServers, defaultConfig);
     executorService.execute(() -> startService(bootstrapServers, defaultConfig));
     running = true;
     log.info("Started Service " + getClass().getSimpleName());
@@ -86,13 +88,21 @@ public class OrderDetailsService implements Service {
           }
           for (final ConsumerRecord<String, Order> record : records) {
             final Order order = record.value();
+            System.out.printf("[OrderDetailsService] Received order topic=%s partition=%d offset=%d id=%s state=%s%n",
+                record.topic(), record.partition(), record.offset(), order.getId(), order.getState());
             if (OrderState.CREATED.equals(order.getState())) {
               //Validate the order then send the result (but note we are in a transaction so
               //nothing will be "seen" downstream until we commit the transaction below)
-              producer.send(result(order, isValid(order) ? PASS : FAIL));
+              final OrderValidationResult validationResult = isValid(order) ? PASS : FAIL;
+              producer.send(result(order, validationResult));
+              System.out.printf("[OrderDetailsService] Emitting validation orderId=%s type=%s result=%s%n",
+                  order.getId(), ORDER_DETAILS_CHECK, validationResult);
               if (eosEnabled) {
                 recordOffset(consumedOffsets, record);
               }
+            } else {
+              System.out.printf("[OrderDetailsService] Skipping order id=%s because state=%s%n",
+                  order.getId(), order.getState());
             }
           }
           if (eosEnabled) {

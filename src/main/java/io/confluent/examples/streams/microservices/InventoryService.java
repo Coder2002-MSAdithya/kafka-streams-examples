@@ -65,6 +65,8 @@ public class InventoryService implements Service {
                     final Properties defaultConfig) {
     streams = processStreams(bootstrapServers, stateDir, defaultConfig);
     streams.cleanUp(); //don't do this in prod as it clears your state stores
+    registerDifcClient(SERVICE_APP_ID, bootstrapServers, defaultConfig);
+    createDifcTag(SERVICE_APP_ID, "inv-valid", bootstrapServers, defaultConfig);
     final CountDownLatch startLatch = new CountDownLatch(1);
     streams.setStateListener((newState, oldState) -> {
       if (newState == State.RUNNING && oldState != KafkaStreams.State.RUNNING) {
@@ -99,7 +101,10 @@ public class InventoryService implements Service {
     final StreamsBuilder builder = new StreamsBuilder();
     final KStream<String, Order> orders = builder
       .stream(Topics.ORDERS.name(),
-        Consumed.with(Topics.ORDERS.keySerde(), Topics.ORDERS.valueSerde()));
+        Consumed.with(Topics.ORDERS.keySerde(), Topics.ORDERS.valueSerde()))
+      .peek((id, order) -> System.out.printf(
+        "[InventoryService] Received order id=%s state=%s product=%s quantity=%s%n",
+        id, order.getState(), order.getProduct(), order.getQuantity()));
     final KTable<Product, Integer> warehouseInventory = builder
       .table(Topics.WAREHOUSE_INVENTORY.name(),
         Consumed.with(Topics.WAREHOUSE_INVENTORY.keySerde(), Topics.WAREHOUSE_INVENTORY.valueSerde()));
@@ -164,6 +169,15 @@ public class InventoryService implements Service {
         //fail the order
         validated = new OrderValidation(order.getId(), INVENTORY_CHECK, FAIL);
       }
+      System.out.printf(
+          "[InventoryService] Emitting validation orderId=%s type=%s result=%s product=%s warehouse=%s reserved=%s quantity=%s%n",
+          validated.getOrderId(),
+          validated.getCheckType(),
+          validated.getValidationResult(),
+          order.getProduct(),
+          warehouseStockCount,
+          reserved,
+          order.getQuantity());
       context.forward(record.withKey(validated.getOrderId()).withValue(validated));
     }
   }

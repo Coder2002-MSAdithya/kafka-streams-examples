@@ -58,6 +58,7 @@ public class EmailService implements Service {
                     final Properties defaultConfig) {
     streams = processStreams(bootstrapServers, stateDir, defaultConfig);
     streams.cleanUp(); //don't do this in prod as it clears your state stores
+    registerDifcClient(SERVICE_APP_ID, bootstrapServers, defaultConfig);
     final CountDownLatch startLatch = new CountDownLatch(1);
     streams.setStateListener((newState, oldState) -> {
       if (newState == State.RUNNING && oldState != KafkaStreams.State.RUNNING) {
@@ -85,11 +86,17 @@ public class EmailService implements Service {
 
     //Create the streams/tables for the join
     final KStream<String, Order> orders = builder.stream(ORDERS.name(),
-        Consumed.with(ORDERS.keySerde(), ORDERS.valueSerde()));
+        Consumed.with(ORDERS.keySerde(), ORDERS.valueSerde()))
+        .peek((id, order) -> System.out.printf(
+            "[EmailService] Received order id=%s state=%s customer=%s%n",
+            id, order.getState(), order.getCustomerId()));
     final KStream<String, Payment> payments = builder.stream(PAYMENTS.name(),
         Consumed.with(PAYMENTS.keySerde(), PAYMENTS.valueSerde()))
         //Rekey payments to be by OrderId for the windowed join
-        .selectKey((s, payment) -> payment.getOrderId());
+        .selectKey((s, payment) -> payment.getOrderId())
+        .peek((orderId, payment) -> System.out.printf(
+            "[EmailService] Received payment id=%s orderId=%s amount=%s %s%n",
+            payment.getId(), orderId, payment.getAmount(), payment.getCcy()));
     final GlobalKTable<Long, Customer> customers = builder.globalTable(CUSTOMERS.name(),
         Consumed.with(CUSTOMERS.keySerde(), CUSTOMERS.valueSerde()));
 
@@ -106,12 +113,19 @@ public class EmailService implements Service {
             // note how, because we use a GKtable, we can join on any attribute of the Customer.
             EmailTuple::setCustomer)
         //Now for each tuple send an email.
-        .peek((key, emailTuple)
-            -> emailer.sendEmail(emailTuple)
-        );
+        .peek((key, emailTuple) -> {
+          System.out.printf("[EmailService] Sending email for orderId=%s customer=%s level=%s%n",
+              key, emailTuple.order.getCustomerId(), emailTuple.customer.getLevel());
+          emailer.sendEmail(emailTuple);
+        });
 
     //Send the order to a topic whose name is the value of customer level
-    orders.join(customers, (orderId, order) -> order.getCustomerId(), (order, customer) -> new OrderEnriched (order.getId(), order.getCustomerId(), customer.getLevel()))
+    orders.join(customers, (orderId, order) -> order.getCustomerId(), (order, customer) -> {
+          final OrderEnriched enriched = new OrderEnriched(order.getId(), order.getCustomerId(), customer.getLevel());
+          System.out.printf("[EmailService] Emitting enriched order id=%s customer=%s level=%s%n",
+              enriched.getId(), enriched.getCustomerId(), enriched.getCustomerLevel());
+          return enriched;
+        })
         //TopicNameExtractor to get the topic name (i.e., customerLevel) from the enriched order record being sent
         .to((orderId, orderEnriched, record) -> orderEnriched.getCustomerLevel(), Produced.with(ORDERS_ENRICHED.keySerde(), ORDERS_ENRICHED.valueSerde()));
 

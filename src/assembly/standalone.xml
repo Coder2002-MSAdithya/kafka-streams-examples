@@ -29,16 +29,63 @@
             </includes>
         </dependencySet>
 
+        <!-- Unpack most dependencies first; Jersey/Log4j are unpacked last so their
+             classes win if another dependency ships overlapping org.glassfish.jersey.* or
+             org.apache.logging.log4j.* types (avoids NoClassDefFoundError at runtime). -->
         <dependencySet>
             <outputDirectory>/</outputDirectory>
             <useProjectArtifact>false</useProjectArtifact>
             <unpack>true</unpack>
             <scope>runtime</scope>
+            <excludes>
+                <exclude>org.glassfish.jersey:*</exclude>
+                <exclude>org.glassfish.hk2:*</exclude>
+                <exclude>org.apache.logging.log4j:*</exclude>
+                <!-- Ships a tiny Log4j2Plugins.dat that breaks PatternLayout (%d, %thread, …) -->
+                <exclude>io.confluent:logredactor</exclude>
+            </excludes>
             <unpackOptions>
                 <excludes>
                     <exclude>log4j2.yaml</exclude>
                 </excludes>
             </unpackOptions>
+        </dependencySet>
+
+        <dependencySet>
+            <outputDirectory>/</outputDirectory>
+            <useProjectArtifact>false</useProjectArtifact>
+            <unpack>true</unpack>
+            <scope>runtime</scope>
+            <includes>
+                <include>org.glassfish.jersey:*</include>
+                <include>org.glassfish.hk2:*</include>
+            </includes>
+        </dependencySet>
+
+        <dependencySet>
+            <outputDirectory>/</outputDirectory>
+            <useProjectArtifact>false</useProjectArtifact>
+            <unpack>true</unpack>
+            <scope>runtime</scope>
+            <includes>
+                <include>org.apache.logging.log4j:*</include>
+            </includes>
+            <unpackOptions>
+                <excludes>
+                    <exclude>log4j2.yaml</exclude>
+                </excludes>
+            </unpackOptions>
+        </dependencySet>
+
+        <!-- Must be last: restores full Log4j2 PatternLayout plugins after any other JAR -->
+        <dependencySet>
+            <outputDirectory>/</outputDirectory>
+            <useProjectArtifact>false</useProjectArtifact>
+            <unpack>true</unpack>
+            <scope>runtime</scope>
+            <includes>
+                <include>org.apache.logging.log4j:log4j-core</include>
+            </includes>
         </dependencySet>
     </dependencySets>
 </assembly>

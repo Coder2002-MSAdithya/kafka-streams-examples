@@ -146,6 +146,8 @@ public class OrdersService implements Service {
   }
 
   private void maybeCompleteLongPollGet(final String id, final Order order) {
+    System.out.printf("[OrdersService] Materialized order update id=%s state=%s product=%s quantity=%s%n",
+        id, order.getState(), order.getProduct(), order.getQuantity());
     final FilteredResponse<String, Order> callback = outstandingRequests.get(id);
     if (callback != null && callback.predicate.test(id, order)) {
       callback.asyncResponse.resume(toBean(order));
@@ -319,6 +321,8 @@ public class OrdersService implements Service {
     setTimeout(timeout, response);
 
     final Order bean = fromBean(order);
+    System.out.printf("[OrdersService] Received HTTP order id=%s state=%s product=%s quantity=%s%n",
+        bean.getId(), bean.getState(), bean.getProduct(), bean.getQuantity());
     producer.send(new ProducerRecord<>(ORDERS.name(), bean.getId(), bean),
         callback(response, bean.getId()));
   }
@@ -328,6 +332,8 @@ public class OrdersService implements Service {
   public void start(final String bootstrapServers,
                     final String stateDir,
                     final Properties defaultConfig) {
+    registerDifcClient(SERVICE_APP_ID, bootstrapServers, defaultConfig);
+    createDifcTag(SERVICE_APP_ID, "order", bootstrapServers, defaultConfig);
     jettyServer = startJetty(port, this);
     port = jettyServer.getURI().getPort(); // update port, in case port was zero
     producer = startProducer(bootstrapServers, ORDERS, defaultConfig);
@@ -412,6 +418,8 @@ public class OrdersService implements Service {
       if (e != null) {
         response.resume(e);
       } else {
+        System.out.printf("[OrdersService] Produced order id=%s topic=%s partition=%d offset=%d%n",
+            orderId, recordMetadata.topic(), recordMetadata.partition(), recordMetadata.offset());
         try {
           //Return the location of the newly created resource
           final Response uri = Response.created(new URI("/v1/orders/" + orderId)).build();
