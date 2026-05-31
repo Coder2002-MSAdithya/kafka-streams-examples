@@ -5,195 +5,131 @@ import static io.confluent.examples.streams.avro.microservices.OrderValidationRe
 import static io.confluent.examples.streams.avro.microservices.OrderValidationType.ORDER_DETAILS_CHECK;
 import static io.confluent.examples.streams.microservices.domain.Schemas.Topics;
 import static io.confluent.examples.streams.microservices.util.MicroserviceUtils.*;
-import static java.util.Collections.singletonList;
 
 import io.confluent.examples.streams.avro.microservices.Order;
-import io.confluent.examples.streams.avro.microservices.OrderState;
 import io.confluent.examples.streams.avro.microservices.OrderValidation;
 import io.confluent.examples.streams.avro.microservices.OrderValidationResult;
 import io.confluent.examples.streams.microservices.domain.Schemas;
 
 import java.io.IOException;
-import java.time.Duration;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import io.confluent.kafka.serializers.AbstractKafkaSchemaSerDeConfig;
 import org.apache.commons.cli.*;
-import org.apache.kafka.clients.consumer.*;
-import org.apache.kafka.clients.producer.KafkaProducer;
-import org.apache.kafka.clients.producer.ProducerConfig;
-import org.apache.kafka.clients.producer.ProducerRecord;
-import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.clients.Capability;
+import org.apache.kafka.streams.KafkaStreams;
+import org.apache.kafka.streams.KafkaStreams.State;
+import org.apache.kafka.streams.StreamsBuilder;
+import org.apache.kafka.streams.kstream.Consumed;
+import org.apache.kafka.streams.kstream.KStream;
+import org.apache.kafka.streams.kstream.Produced;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Validates the details of each order.
- * - Is the quantity positive?
- * - Is there a customerId
- * - etc...
+ * Validates the details of each order (quantity, price, product).
  * <p>
- * This service could be built with Kafka Streams but we've used a Producer/Consumer pair
- * including the integration with Kafka's Exactly Once feature (Transactions) to demonstrate
- * this other style of building event driven services. Care needs to be taken with this approach
- * as in the current release multi-node support is not provided for the transactional consumer
- * (but it is supported inside Kafka Streams)
+ * Implemented with Kafka Streams (same pattern as {@link FraudService}) so DIFC operations
+ * use the shared Streams producer via {@link KafkaStreams#requestGrantCap}.
  */
 public class OrderDetailsService implements Service {
 
   private static final Logger log = LoggerFactory.getLogger(OrderDetailsService.class);
+  private static final String SERVICE_APP_ID = "OrderDetailsService";
+  private static final String DIFC_ORDER_TAG = "order";
+  private static final String DIFC_VALIDATION_TAG = "order-valid";
 
-  private final String CONSUMER_GROUP_ID = getClass().getSimpleName();
-  private KafkaConsumer<String, Order> consumer;
-  private KafkaProducer<String, OrderValidation> producer;
-  private final ExecutorService executorService = Executors.newSingleThreadExecutor();
-  private volatile boolean running;
-
-  // Disable Exactly Once Semantics to enable Confluent Monitoring Interceptors
-  private boolean eosEnabled = false;
+  private KafkaStreams streams;
 
   @Override
   public void start(final String bootstrapServers,
                     final String stateDir,
                     final Properties defaultConfig) {
-    registerDifcClient(getClass().getSimpleName(), bootstrapServers, defaultConfig);
-    createDifcTag(getClass().getSimpleName(), "order-valid", bootstrapServers, defaultConfig);
-    executorService.execute(() -> startService(bootstrapServers, defaultConfig));
-    running = true;
-    log.info("Started Service " + getClass().getSimpleName());
-  }
+    streams = processStreams(bootstrapServers, stateDir, defaultConfig);
+    registerDifcClient(SERVICE_APP_ID, bootstrapServers, defaultConfig);
+    createDifcTag(SERVICE_APP_ID, DIFC_VALIDATION_TAG, bootstrapServers, defaultConfig);
 
-  private void startService(final String bootstrapServers, final Properties defaultConfig) {
-    startConsumer(bootstrapServers, defaultConfig);
-    startProducer(bootstrapServers, defaultConfig);
+    final CountDownLatch startLatch = new CountDownLatch(1);
+    streams.setStateListener((newState, oldState) -> {
+      if (newState == State.RUNNING && oldState != State.RUNNING) {
+        startLatch.countDown();
+      }
+    });
+    streams.start();
 
     try {
-      final Map<TopicPartition, OffsetAndMetadata> consumedOffsets = new HashMap<>();
-      consumer.subscribe(singletonList(Topics.ORDERS.name()));
-      if (eosEnabled) {
-        producer.initTransactions();
+      if (!startLatch.await(60, TimeUnit.SECONDS)) {
+        throw new RuntimeException("Streams never finished rebalancing on startup");
       }
-
-      while (running) {
-        final ConsumerRecords<String, Order> records = consumer.poll(Duration.ofMillis(100));
-        if (records.count() > 0) {
-          if (eosEnabled) {
-            producer.beginTransaction();
-          }
-          for (final ConsumerRecord<String, Order> record : records) {
-            final Order order = record.value();
-            System.out.printf("[OrderDetailsService] Received order topic=%s partition=%d offset=%d id=%s state=%s%n",
-                record.topic(), record.partition(), record.offset(), order.getId(), order.getState());
-            if (OrderState.CREATED.equals(order.getState())) {
-              //Validate the order then send the result (but note we are in a transaction so
-              //nothing will be "seen" downstream until we commit the transaction below)
-              final OrderValidationResult validationResult = isValid(order) ? PASS : FAIL;
-              producer.send(result(order, validationResult));
-              System.out.printf("[OrderDetailsService] Emitting validation orderId=%s type=%s result=%s%n",
-                  order.getId(), ORDER_DETAILS_CHECK, validationResult);
-              if (eosEnabled) {
-                recordOffset(consumedOffsets, record);
-              }
-            } else {
-              System.out.printf("[OrderDetailsService] Skipping order id=%s because state=%s%n",
-                  order.getId(), order.getState());
-            }
-          }
-          if (eosEnabled) {
-            producer.sendOffsetsToTransaction(consumedOffsets, new ConsumerGroupMetadata(CONSUMER_GROUP_ID));
-            producer.commitTransaction();
-          }
-        }
-      }
-    } finally {
-      close();
+    } catch (final InterruptedException e) {
+      Thread.currentThread().interrupt();
     }
-  }
 
-  private void recordOffset(final Map<TopicPartition, OffsetAndMetadata> consumedOffsets,
-                            final ConsumerRecord<String, Order> record) {
-    final OffsetAndMetadata nextOffset = new OffsetAndMetadata(record.offset() + 1);
-    consumedOffsets.put(new TopicPartition(record.topic(), record.partition()), nextOffset);
-  }
+    requestDifcGrantCapAddAndRemove(SERVICE_APP_ID, streams, DIFC_ORDER_TAG);
+    addDifcTagToClientLabel(SERVICE_APP_ID, streams, DIFC_VALIDATION_TAG);
 
-  private ProducerRecord<String, OrderValidation> result(final Order order,
-                                                         final OrderValidationResult passOrFail) {
-    return new ProducerRecord<>(
-        Topics.ORDER_VALIDATIONS.name(),
-        order.getId(),
-        new OrderValidation(order.getId(), ORDER_DETAILS_CHECK, passOrFail)
-    );
-  }
-
-  private void startProducer(final String bootstrapServers, final Properties defaultConfig) {
-    final Properties producerConfig = new Properties();
-    producerConfig.putAll(defaultConfig);
-    producerConfig.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-    if (eosEnabled) {
-      producerConfig.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, "OrderDetailsServiceInstance1");
-    }
-    producerConfig.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true");
-    producerConfig.put(ProducerConfig.RETRIES_CONFIG, String.valueOf(Integer.MAX_VALUE));
-    producerConfig.put(ProducerConfig.ACKS_CONFIG, "all");
-    producerConfig.put(ProducerConfig.CLIENT_ID_CONFIG, "order-details-service-producer");
-
-    producer = new KafkaProducer<>(producerConfig,
-        Topics.ORDER_VALIDATIONS.keySerde().serializer(),
-        Topics.ORDER_VALIDATIONS.valueSerde().serializer());
-  }
-
-  private void startConsumer(final String bootstrapServers, final Properties defaultConfig) {
-    final Properties consumerConfig = new Properties();
-    consumerConfig.putAll(defaultConfig);
-    consumerConfig.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-    consumerConfig.put(ConsumerConfig.GROUP_ID_CONFIG, CONSUMER_GROUP_ID);
-    consumerConfig.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-    consumerConfig.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, !eosEnabled);
-    consumerConfig.put(ConsumerConfig.CLIENT_ID_CONFIG, "order-details-service-consumer");
-
-    consumer = new KafkaConsumer<>(consumerConfig,
-        Topics.ORDERS.keySerde().deserializer(),
-        Topics.ORDERS.valueSerde().deserializer());
-  }
-
-  private void close() {
-    if (producer != null) {
-      producer.close();
-    }
-    if (consumer != null) {
-      consumer.close();
-    }
+    log.info("Started Service " + getClass().getSimpleName());
   }
 
   @Override
   public void stop() {
-    running = false;
-    try {
-      executorService.awaitTermination(1000, TimeUnit.MILLISECONDS);
-    } catch (final InterruptedException e) {
-      log.info("Failed to stop " + getClass().getSimpleName() + " in 1000ms");
+    if (streams != null) {
+      streams.close();
     }
     log.info(getClass().getSimpleName() + " was stopped");
   }
 
-  private boolean isValid(final Order order) {
-    if (order.getQuantity() < 0) {
-      return false;
-    }
-    if (order.getPrice() < 0) {
-      return false;
-    }
-    return order.getProduct() != null;
+  private KafkaStreams processStreams(final String bootstrapServers,
+                                      final String stateDir,
+                                      final Properties defaultConfig) {
+    final StreamsBuilder builder = new StreamsBuilder();
+    final KStream<String, Order> orders = builder
+        .stream(Topics.ORDERS.name(), Consumed.with(Topics.ORDERS.keySerde(), Topics.ORDERS.valueSerde()))
+        .peek((id, order) -> logOrderIntake(SERVICE_APP_ID, id, order))
+        .filter((id, order) -> isLiveCreatedOrder(id, order));
+
+    orders
+        .mapValues(order -> {
+          final String failReason = validationFailReason(order);
+          final OrderValidationResult validationResult = failReason == null ? PASS : FAIL;
+          final OrderValidation validation =
+              new OrderValidation(order.getId(), ORDER_DETAILS_CHECK, validationResult);
+          logValidationDecision(
+              SERVICE_APP_ID,
+              order.getId(),
+              ORDER_DETAILS_CHECK.name(),
+              validationResult,
+              failReason == null
+                  ? "order details valid (quantity>=0, price>=0, product present)"
+                  : failReason);
+          return validation;
+        })
+        .addTags(difcTagSet(DIFC_VALIDATION_TAG))
+        .to(Topics.ORDER_VALIDATIONS.name(),
+            Produced.with(Topics.ORDER_VALIDATIONS.keySerde(), Topics.ORDER_VALIDATIONS.valueSerde()));
+
+    return new KafkaStreams(
+        builder.build(),
+        baseStreamsConfig(bootstrapServers, stateDir, SERVICE_APP_ID, defaultConfig));
   }
 
-  public void setEosEnabled(final boolean value) {
-    this.eosEnabled = value;
+  /**
+   * @return human-readable failure reason, or {@code null} if the order passes validation
+   */
+  static String validationFailReason(final Order order) {
+    if (order.getQuantity() < 0) {
+      return "quantity is negative: " + order.getQuantity();
+    }
+    if (order.getPrice() < 0) {
+      return "price is negative: " + order.getPrice();
+    }
+    if (order.getProduct() == null) {
+      return "product is missing";
+    }
+    return null;
   }
 
   public static void main(final String[] args) throws Exception {
@@ -223,8 +159,7 @@ public class OrderDetailsService implements Service {
     final CommandLine cl = new DefaultParser().parse(opts, args);
 
     if (cl.hasOption("h")) {
-      final HelpFormatter formatter = new HelpFormatter();
-      formatter.printHelp("Order Details Service", opts);
+      new HelpFormatter().printHelp("Order Details Service", opts);
       return;
     }
     final Properties defaultConfig = Optional.ofNullable(cl.getOptionValue("config-file", (String) null))
@@ -249,4 +184,3 @@ public class OrderDetailsService implements Service {
     addShutdownHookAndBlock(service);
   }
 }
-

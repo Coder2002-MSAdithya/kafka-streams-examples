@@ -99,15 +99,12 @@ public class ValidationsAggregatorService implements Service {
     final StreamsBuilder builder = new StreamsBuilder();
     final KStream<String, OrderValidation> validations = builder
         .stream(ORDER_VALIDATIONS.name(), serdes1)
-        .peek((id, validation) -> System.out.printf(
-            "[ValidationsAggregatorService] Received validation orderId=%s type=%s result=%s%n",
-            id, validation.getCheckType(), validation.getValidationResult()));
+        .peek((id, validation) -> logValidationIntake(SERVICE_APP_ID, id, validation))
+        .filter((id, validation) -> isNotTombstone(id, validation));
     final KStream<String, Order> orders = builder
         .stream(ORDERS.name(), serdes2)
-        .filter((id, order) -> OrderState.CREATED.equals(order.getState()))
-        .peek((id, order) -> System.out.printf(
-            "[ValidationsAggregatorService] Received CREATED order id=%s customer=%s product=%s%n",
-            id, order.getCustomerId(), order.getProduct()));
+        .peek((id, order) -> logOrderIntake(SERVICE_APP_ID, id, order))
+        .filter((id, order) -> isLiveCreatedOrder(id, order));
 
     //If all rules pass then validate the order
     validations
@@ -127,22 +124,27 @@ public class ValidationsAggregatorService implements Service {
         .filter((k, total) -> total >= numberOfRules)
         //Join back to orders
         .join(orders, (id, order) -> {
-                //Set the order to Validated
                 final Order validatedOrder = newBuilder(order).setState(VALIDATED).build();
-                System.out.printf("[ValidationsAggregatorService] Emitting order id=%s state=%s after all validations passed%n",
-                    validatedOrder.getId(), validatedOrder.getState());
+                System.out.printf(
+                    "[%s] Aggregation decision orderId=%s state=%s reason=all %d validators returned PASS within join window%n",
+                    SERVICE_APP_ID,
+                    validatedOrder.getId(),
+                    validatedOrder.getState(),
+                    numberOfRules);
                 return validatedOrder;
             }, JoinWindows.ofTimeDifferenceWithNoGrace(Duration.ofMinutes(5)), serdes4)
         //Push the validated order into the orders topic
         .to(ORDERS.name(), serdes5);
 
     //If any rule fails then fail the order
-    validations.filter((id, rule) -> FAIL.equals(rule.getValidationResult()))
+    validations.filter((id, rule) -> isLiveFailedValidation(id, rule))
         .join(orders, (id, order) -> {
-                //Set the order to Failed and bump the version on it's ID
                 final Order failedOrder = newBuilder(order).setState(OrderState.FAILED).build();
-                System.out.printf("[ValidationsAggregatorService] Emitting order id=%s state=%s due to failed validation%n",
-                    failedOrder.getId(), failedOrder.getState());
+                System.out.printf(
+                    "[%s] Aggregation decision orderId=%s state=%s reason=at least one validator returned FAIL (fraud, inventory, or order-details)%n",
+                    SERVICE_APP_ID,
+                    failedOrder.getId(),
+                    failedOrder.getState());
                 return failedOrder;
             }, JoinWindows.ofTimeDifferenceWithNoGrace(Duration.ofMinutes(5)), serdes7)
         //there could be multiple failed rules for each order so collapse to a single order

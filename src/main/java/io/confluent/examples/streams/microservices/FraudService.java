@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit;
 
 import io.confluent.kafka.serializers.AbstractKafkaSchemaSerDeConfig;
 import org.apache.commons.cli.*;
+import org.apache.kafka.clients.Capability;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.StreamsBuilder;
@@ -26,6 +27,7 @@ import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.util.Properties;
+import java.util.Set;
 
 import static io.confluent.examples.streams.avro.microservices.OrderValidationResult.FAIL;
 import static io.confluent.examples.streams.avro.microservices.OrderValidationResult.PASS;
@@ -47,6 +49,11 @@ public class FraudService implements Service {
   private final String SERVICE_APP_ID = getClass().getSimpleName();
 
   private static final int FRAUD_LIMIT = 2000;
+  /** Tag on {@code orders} records produced by OrdersService; fraud-svc needs CAN_ADD and CAN_REMOVE. */
+  private static final String DIFC_ORDER_TAG = "order";
+  /** Tag owned by this service; attached to {@code order-validations} output via {@code KStream#addTags}. */
+  private static final String DIFC_VALIDATION_TAG = "fraud";
+  private static final Set<String> DIFC_VALIDATION_OUTPUT_TAGS = difcTagSet(DIFC_VALIDATION_TAG);
   private KafkaStreams streams;
 
   @Override
@@ -56,7 +63,7 @@ public class FraudService implements Service {
     streams = processStreams(bootstrapServers, stateDir, defaultConfig);
     streams.cleanUp(); //don't do this in prod as it clears your state stores
     registerDifcClient(SERVICE_APP_ID, bootstrapServers, defaultConfig);
-    createDifcTag(SERVICE_APP_ID, "fraud", bootstrapServers, defaultConfig);
+    createDifcTag(SERVICE_APP_ID, DIFC_VALIDATION_TAG, bootstrapServers, defaultConfig);
     final CountDownLatch startLatch = new CountDownLatch(1);
     streams.setStateListener((newState, oldState) -> {
       if (newState == State.RUNNING && oldState != KafkaStreams.State.RUNNING) {
@@ -74,6 +81,9 @@ public class FraudService implements Service {
       Thread.currentThread().interrupt();
     }
 
+    requestDifcGrantCapAddAndRemove(SERVICE_APP_ID, streams, DIFC_ORDER_TAG);
+    addDifcTagToClientLabel(SERVICE_APP_ID, streams, DIFC_VALIDATION_TAG);
+
     log.info("Started Service " + getClass().getSimpleName());
   }
 
@@ -85,10 +95,8 @@ public class FraudService implements Service {
     final StreamsBuilder builder = new StreamsBuilder();
     final KStream<String, Order> orders = builder
         .stream(ORDERS.name(), Consumed.with(ORDERS.keySerde(), ORDERS.valueSerde()))
-        .filter((id, order) -> OrderState.CREATED.equals(order.getState()))
-        .peek((id, order) -> System.out.printf(
-            "[FraudService] Received CREATED order id=%s customer=%s product=%s quantity=%s price=%s%n",
-            id, order.getCustomerId(), order.getProduct(), order.getQuantity(), order.getPrice()));
+        .peek((id, order) -> logOrderIntake(SERVICE_APP_ID, id, order))
+        .filter((id, order) -> isLiveCreatedOrder(id, order));
 
     //Create an aggregate of the total value by customer and hold it with the order. We use session windows to
     // detect periods of activity.
@@ -114,21 +122,38 @@ public class FraudService implements Service {
         .branch((id, orderValue) -> orderValue.getValue() < FRAUD_LIMIT, Branched.as("below"))
         .noDefaultBranch();
 
-    forks.get("limit-above").mapValues(orderValue -> {
+    final KStream<String, OrderValidation> aboveLimit = forks.get("limit-above").mapValues(orderValue -> {
       final OrderValidation validation = new OrderValidation(orderValue.getOrder().getId(), FRAUD_CHECK, FAIL);
-      System.out.printf("[FraudService] Emitting validation orderId=%s type=%s result=%s total=%s%n",
-          validation.getOrderId(), validation.getCheckType(), validation.getValidationResult(), orderValue.getValue());
+      logValidationDecision(
+          SERVICE_APP_ID,
+          validation.getOrderId(),
+          validation.getCheckType().name(),
+          validation.getValidationResult(),
+          String.format(
+              "customer %s session order total %.2f >= fraud limit %d",
+              orderValue.getOrder().getCustomerId(),
+              orderValue.getValue(),
+              FRAUD_LIMIT));
       return validation;
-    })
-        .to(ORDER_VALIDATIONS.name(), Produced
-            .with(ORDER_VALIDATIONS.keySerde(), ORDER_VALIDATIONS.valueSerde()));
+    });
 
-    forks.get("limit-below").mapValues(orderValue -> {
+    final KStream<String, OrderValidation> belowLimit = forks.get("limit-below").mapValues(orderValue -> {
       final OrderValidation validation = new OrderValidation(orderValue.getOrder().getId(), FRAUD_CHECK, PASS);
-      System.out.printf("[FraudService] Emitting validation orderId=%s type=%s result=%s total=%s%n",
-          validation.getOrderId(), validation.getCheckType(), validation.getValidationResult(), orderValue.getValue());
+      logValidationDecision(
+          SERVICE_APP_ID,
+          validation.getOrderId(),
+          validation.getCheckType().name(),
+          validation.getValidationResult(),
+          String.format(
+              "customer %s session order total %.2f < fraud limit %d",
+              orderValue.getOrder().getCustomerId(),
+              orderValue.getValue(),
+              FRAUD_LIMIT));
       return validation;
-    })
+    });
+
+    aboveLimit.merge(belowLimit)
+        .addTags(DIFC_VALIDATION_OUTPUT_TAGS)
         .to(ORDER_VALIDATIONS.name(), Produced
             .with(ORDER_VALIDATIONS.keySerde(), ORDER_VALIDATIONS.valueSerde()));
 

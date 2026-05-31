@@ -1,14 +1,25 @@
 package io.confluent.examples.streams.microservices.util;
 
+import io.confluent.examples.streams.avro.microservices.Order;
+import io.confluent.examples.streams.avro.microservices.OrderState;
+import io.confluent.examples.streams.avro.microservices.OrderValidation;
+import io.confluent.examples.streams.avro.microservices.OrderValidationResult;
 import io.confluent.examples.streams.avro.microservices.Product;
 import io.confluent.examples.streams.microservices.Service;
 import io.confluent.examples.streams.microservices.domain.Schemas;
 
+import org.apache.kafka.clients.Capability;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.message.AddClientPrivsResponseData;
+import org.apache.kafka.common.message.AddTagResponseData;
 import org.apache.kafka.common.message.CreateTagResponseData;
+import org.apache.kafka.common.message.GrantCapResponseData;
+import org.apache.kafka.common.message.PollPrivsReqResponseData;
 import org.apache.kafka.common.message.RegisterClientResponseData;
+import org.apache.kafka.streams.KafkaStreams;
+import org.apache.kafka.streams.difc.DifcPrivilegeRequestHandler;
 import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.common.serialization.Serializer;
@@ -34,13 +45,94 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.Collections;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 public class MicroserviceUtils {
 
   private static final Logger log = LoggerFactory.getLogger(MicroserviceUtils.class);
+
+  /**
+   * Stream/tombstone filter: DIFC may replace unauthorized payloads with null values;
+   * compacted topics and window evictions also emit null-valued records.
+   */
+  public static <K, V> boolean isNotTombstone(final K ignored, final V value) {
+    return value != null;
+  }
+
+  public static boolean isLiveCreatedOrder(final String ignored, final Order order) {
+    return isLiveCreatedOrder(order);
+  }
+
+  public static boolean isLiveCreatedOrder(final Order order) {
+    return order != null && OrderState.CREATED.equals(order.getState());
+  }
+
+  public static boolean isLiveFailedValidation(final String ignored, final OrderValidation validation) {
+    return validation != null && OrderValidationResult.FAIL.equals(validation.getValidationResult());
+  }
+
+  /**
+   * Log every record read from {@code orders} before tombstone/state filters run.
+   */
+  public static void logOrderIntake(final String serviceName, final String orderKey, final Order order) {
+    if (order == null) {
+      System.out.printf(
+          "[%s] Order key=%s status=tombstone/redacted reason=null value (DIFC payload strip or compact delete)%n",
+          serviceName, orderKey);
+      return;
+    }
+    if (!OrderState.CREATED.equals(order.getState())) {
+      System.out.printf(
+          "[%s] Order key=%s status=skipped reason=state is %s (only CREATED is validated)%n",
+          serviceName, orderKey, order.getState());
+      return;
+    }
+    System.out.printf(
+        "[%s] Order key=%s status=accepted for validation id=%s customer=%s product=%s quantity=%s price=%s%n",
+        serviceName,
+        orderKey,
+        order.getId(),
+        order.getCustomerId(),
+        order.getProduct(),
+        order.getQuantity(),
+        order.getPrice());
+  }
+
+  /**
+   * Log every record read from {@code order-validations} before tombstone filters run.
+   */
+  public static void logValidationIntake(final String serviceName,
+                                         final String validationKey,
+                                         final OrderValidation validation) {
+    if (validation == null) {
+      System.out.printf(
+          "[%s] Validation key=%s status=tombstone/redacted reason=null value%n",
+          serviceName, validationKey);
+      return;
+    }
+    System.out.printf(
+        "[%s] Validation key=%s status=received orderId=%s type=%s result=%s%n",
+        serviceName,
+        validationKey,
+        validation.getOrderId(),
+        validation.getCheckType(),
+        validation.getValidationResult());
+  }
+
+  public static void logValidationDecision(final String serviceName,
+                                           final String orderId,
+                                           final String checkType,
+                                           final OrderValidationResult result,
+                                           final String reason) {
+    System.out.printf(
+        "[%s] Validation decision orderId=%s type=%s result=%s reason=%s%n",
+        serviceName, orderId, checkType, result, reason);
+  }
+
   public static final String DEFAULT_BOOTSTRAP_SERVERS = "localhost:9092";
   public static final String DEFAULT_SCHEMA_REGISTRY_URL = "http://localhost:8081";
 
@@ -223,6 +315,96 @@ public class MicroserviceUtils {
           response.errorCode(),
           response.errorMessage());
     }
+  }
+
+  /** Single-tag set for {@link org.apache.kafka.streams.kstream.KStream#addTags(Set)}. */
+  public static Set<String> difcTagSet(final String tagName) {
+    return Collections.singleton(tagName);
+  }
+
+  /**
+   * Add a tag to this Streams client's DIFC label (required for FETCH/produce tag union).
+   */
+  public static void addDifcTagToClientLabel(final String serviceName,
+                                            final KafkaStreams streams,
+                                            final String tagName) {
+    final AddTagResponseData labelResponse = streams.addTag(tagName);
+    System.out.printf(
+        "[DIFC] addTagToLabel service=%s tag=%s errorCode=%d message=%s%n",
+        serviceName,
+        tagName,
+        labelResponse.errorCode(),
+        labelResponse.errorMessage());
+  }
+
+  /**
+   * Send {@code GRANT_CAP} via the running {@link KafkaStreams} app's shared producer.
+   */
+  public static void requestDifcGrantCap(final String serviceName,
+                                        final KafkaStreams streams,
+                                        final String tagName,
+                                        final Capability capability) {
+    final GrantCapResponseData response = streams.requestGrantCap(tagName, capability);
+    System.out.printf(
+        "[DIFC] requestGrantCap service=%s tag=%s capability=%s errorCode=%d message=%s%n",
+        serviceName,
+        tagName,
+        capability,
+        response.errorCode(),
+        response.errorMessage());
+  }
+
+  /**
+   * Request {@code CAN_ADD}/{@code CAN_REMOVE} on a shared tag, then add the tag to this
+   * client's label. FETCH redaction uses label tags ({@code canClientReceive}), not
+   * {@code canAdd} alone — {@link KafkaStreams#addTag} is required to read tagged records.
+   */
+  public static void requestDifcGrantCapAddAndRemove(final String serviceName,
+                                                     final KafkaStreams streams,
+                                                     final String tagName) {
+    requestDifcGrantCap(serviceName, streams, tagName, Capability.CAN_ADD);
+    requestDifcGrantCap(serviceName, streams, tagName, Capability.CAN_REMOVE);
+    addDifcTagToClientLabel(serviceName, streams, tagName);
+  }
+
+  public static Capability capabilityFromPollResponse(final byte capability) {
+    return switch (capability) {
+      case 0 -> Capability.CAN_ADD;
+      case 1 -> Capability.CAN_REMOVE;
+      default -> throw new IllegalArgumentException("Unknown DIFC capability code: " + capability);
+    };
+  }
+
+  /**
+   * Grant a pending capability request (tag owner approves requester via {@code ADD_CLIENT_PRIVS}).
+   */
+  public static void grantPendingPrivilegeRequest(final String serviceName,
+                                                  final KafkaStreams streams,
+                                                  final PollPrivsReqResponseData pending) {
+    if (pending == null || pending.capability() < 0) {
+      return;
+    }
+    final String tagName = pending.tagName();
+    final String requester = pending.requesterClientId();
+    if (tagName == null || tagName.isEmpty() || requester == null || requester.isEmpty()) {
+      return;
+    }
+    final Capability capability = capabilityFromPollResponse(pending.capability());
+    final AddClientPrivsResponseData response =
+        streams.addClientPrivs(requester, tagName, capability);
+    System.out.printf(
+        "[DIFC] grantPrivilege service=%s requester=%s tag=%s capability=%s errorCode=%d message=%s%n",
+        serviceName,
+        requester,
+        tagName,
+        capability,
+        response.errorCode(),
+        response.errorMessage());
+  }
+
+  public static DifcPrivilegeRequestHandler autoGrantPrivilegeRequests(final String serviceName,
+                                                                      final KafkaStreams streams) {
+    return pending -> grantPendingPrivilegeRequest(serviceName, streams, pending);
   }
 
   public static void createDifcTag(final String serviceName,

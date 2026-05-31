@@ -9,6 +9,7 @@ import java.util.concurrent.TimeUnit;
 import io.confluent.examples.streams.microservices.domain.Schemas;
 import io.confluent.kafka.serializers.AbstractKafkaSchemaSerDeConfig;
 import org.apache.commons.cli.*;
+import org.apache.kafka.clients.Capability;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.KafkaStreams.State;
@@ -57,6 +58,8 @@ public class InventoryService implements Service {
   private static final Logger log = LoggerFactory.getLogger(InventoryService.class);
   public static final String SERVICE_APP_ID = "InventoryService";
   public static final String RESERVED_STOCK_STORE_NAME = "store-of-reserved-stock";
+  private static final String DIFC_ORDER_TAG = "order";
+  private static final String DIFC_VALIDATION_TAG = "inv-valid";
   private KafkaStreams streams;
 
   @Override
@@ -66,7 +69,7 @@ public class InventoryService implements Service {
     streams = processStreams(bootstrapServers, stateDir, defaultConfig);
     streams.cleanUp(); //don't do this in prod as it clears your state stores
     registerDifcClient(SERVICE_APP_ID, bootstrapServers, defaultConfig);
-    createDifcTag(SERVICE_APP_ID, "inv-valid", bootstrapServers, defaultConfig);
+    createDifcTag(SERVICE_APP_ID, DIFC_VALIDATION_TAG, bootstrapServers, defaultConfig);
     final CountDownLatch startLatch = new CountDownLatch(1);
     streams.setStateListener((newState, oldState) -> {
       if (newState == State.RUNNING && oldState != KafkaStreams.State.RUNNING) {
@@ -83,6 +86,10 @@ public class InventoryService implements Service {
     } catch (final InterruptedException e) {
       Thread.currentThread().interrupt();
     }
+
+    requestDifcGrantCapAddAndRemove(SERVICE_APP_ID, streams, DIFC_ORDER_TAG);
+    addDifcTagToClientLabel(SERVICE_APP_ID, streams, DIFC_VALIDATION_TAG);
+
     log.info("Started Service " + getClass().getSimpleName());
   }
 
@@ -102,9 +109,8 @@ public class InventoryService implements Service {
     final KStream<String, Order> orders = builder
       .stream(Topics.ORDERS.name(),
         Consumed.with(Topics.ORDERS.keySerde(), Topics.ORDERS.valueSerde()))
-      .peek((id, order) -> System.out.printf(
-        "[InventoryService] Received order id=%s state=%s product=%s quantity=%s%n",
-        id, order.getState(), order.getProduct(), order.getQuantity()));
+      .peek((id, order) -> logOrderIntake(SERVICE_APP_ID, id, order))
+      .filter((id, order) -> isNotTombstone(id, order));
     final KTable<Product, Integer> warehouseInventory = builder
       .table(Topics.WAREHOUSE_INVENTORY.name(),
         Consumed.with(Topics.WAREHOUSE_INVENTORY.keySerde(), Topics.WAREHOUSE_INVENTORY.valueSerde()));
@@ -120,13 +126,13 @@ public class InventoryService implements Service {
     //First change orders stream to be keyed by Product (so we can join with warehouse inventory)
     orders.selectKey((id, order) -> order.getProduct())
       //Limit to newly created orders
-      .filter((id, order) -> OrderState.CREATED.equals(order.getState()))
+      .filter((product, order) -> isLiveCreatedOrder(order))
       //Join Orders to Inventory so we can compare each order to its corresponding stock value
       .join(warehouseInventory, KeyValue::new, Joined.with(Topics.WAREHOUSE_INVENTORY.keySerde(),
         Topics.ORDERS.valueSerde(), Serdes.Integer()))
       //Validate the order based on how much stock we have both in the warehouse and locally 'reserved' stock
       .process(InventoryValidator::new, RESERVED_STOCK_STORE_NAME)
-      //Push the result into the Order Validations topic
+      .addTags(difcTagSet(DIFC_VALIDATION_TAG))
       .to(Topics.ORDER_VALIDATIONS.name(), Produced.with(Topics.ORDER_VALIDATIONS.keySerde(),
         Topics.ORDER_VALIDATIONS.valueSerde()));
 
@@ -159,25 +165,28 @@ public class InventoryService implements Service {
         reserved = 0L;
       }
 
+      final long available = warehouseStockCount - reserved;
+      final String reason;
       //If there is enough stock available (considering both warehouse inventory and reserved stock) validate the order
-      if (warehouseStockCount - reserved - order.getQuantity() >= 0) {
+      if (available - order.getQuantity() >= 0) {
         //reserve the stock by adding it to the 'reserved' store
         reservedStocksStore.put(order.getProduct(), reserved + order.getQuantity());
-        //validate the order
         validated = new OrderValidation(order.getId(), INVENTORY_CHECK, PASS);
+        reason = String.format(
+            "sufficient stock: warehouse=%d reserved=%d available=%d requested=%d",
+            warehouseStockCount, reserved, available, order.getQuantity());
       } else {
-        //fail the order
         validated = new OrderValidation(order.getId(), INVENTORY_CHECK, FAIL);
+        reason = String.format(
+            "insufficient stock: warehouse=%d reserved=%d available=%d requested=%d",
+            warehouseStockCount, reserved, available, order.getQuantity());
       }
-      System.out.printf(
-          "[InventoryService] Emitting validation orderId=%s type=%s result=%s product=%s warehouse=%s reserved=%s quantity=%s%n",
+      logValidationDecision(
+          InventoryService.class.getSimpleName(),
           validated.getOrderId(),
-          validated.getCheckType(),
+          validated.getCheckType().name(),
           validated.getValidationResult(),
-          order.getProduct(),
-          warehouseStockCount,
-          reserved,
-          order.getQuantity());
+          reason);
       context.forward(record.withKey(validated.getOrderId()).withValue(validated));
     }
   }

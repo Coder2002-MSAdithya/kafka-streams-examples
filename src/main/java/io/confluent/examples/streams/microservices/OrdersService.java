@@ -18,6 +18,7 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.StoreQueryParameters;
 import org.apache.kafka.streams.StreamsBuilder;
+import org.apache.kafka.streams.Topology;
 import org.apache.kafka.streams.errors.InvalidStateStoreException;
 import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.KafkaStreams.State;
@@ -35,8 +36,10 @@ import org.slf4j.LoggerFactory;
 
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.Collections;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import jakarta.ws.rs.Consumes;
@@ -111,6 +114,8 @@ public class OrdersService implements Service {
   private static final Logger log = LoggerFactory.getLogger(OrdersService.class);
   private static final String CALL_TIMEOUT = "10000";
   private static final String ORDERS_STORE_NAME = "orders-store";
+  private static final String DIFC_ORDER_TAG = "order";
+  private static final Set<String> DIFC_ORDER_TAGS = Collections.singleton(DIFC_ORDER_TAG);
   private final String SERVICE_APP_ID = getClass().getSimpleName();
   private final Client client = ClientBuilder.newBuilder().register(JacksonFeature.class).build();
   private Server jettyServer;
@@ -141,11 +146,16 @@ public class OrdersService implements Service {
   private StreamsBuilder createOrdersMaterializedView() {
     final StreamsBuilder builder = new StreamsBuilder();
     builder.table(ORDERS.name(), Consumed.with(ORDERS.keySerde(), ORDERS.valueSerde()), Materialized.as(ORDERS_STORE_NAME))
-        .toStream().foreach(this::maybeCompleteLongPollGet);
+        .toStream()
+        .filter((id, order) -> isNotTombstone(id, order))
+        .foreach(this::maybeCompleteLongPollGet);
     return builder;
   }
 
   private void maybeCompleteLongPollGet(final String id, final Order order) {
+    if (order == null) {
+      return;
+    }
     System.out.printf("[OrdersService] Materialized order update id=%s state=%s product=%s quantity=%s%n",
         id, order.getState(), order.getProduct(), order.getQuantity());
     final FilteredResponse<String, Order> callback = outstandingRequests.get(id);
@@ -323,7 +333,9 @@ public class OrdersService implements Service {
     final Order bean = fromBean(order);
     System.out.printf("[OrdersService] Received HTTP order id=%s state=%s product=%s quantity=%s%n",
         bean.getId(), bean.getState(), bean.getProduct(), bean.getQuantity());
-    producer.send(new ProducerRecord<>(ORDERS.name(), bean.getId(), bean),
+    producer.sendWithTags(
+        new ProducerRecord<>(ORDERS.name(), bean.getId(), bean),
+        DIFC_ORDER_TAGS,
         callback(response, bean.getId()));
   }
 
@@ -333,7 +345,7 @@ public class OrdersService implements Service {
                     final String stateDir,
                     final Properties defaultConfig) {
     registerDifcClient(SERVICE_APP_ID, bootstrapServers, defaultConfig);
-    createDifcTag(SERVICE_APP_ID, "order", bootstrapServers, defaultConfig);
+    createDifcTag(SERVICE_APP_ID, DIFC_ORDER_TAG, bootstrapServers, defaultConfig);
     jettyServer = startJetty(port, this);
     port = jettyServer.getURI().getPort(); // update port, in case port was zero
     producer = startProducer(bootstrapServers, ORDERS, defaultConfig);
@@ -345,9 +357,14 @@ public class OrdersService implements Service {
 
   private KafkaStreams startKStreams(final String bootstrapServers,
                                      final Properties defaultConfig) {
-    final KafkaStreams streams = new KafkaStreams(
-        createOrdersMaterializedView().build(),
-        config(bootstrapServers, defaultConfig));
+    final Properties streamsProps = config(bootstrapServers, defaultConfig);
+    final Topology topology = createOrdersMaterializedView().build();
+    final KafkaStreams[] streamsHolder = new KafkaStreams[1];
+    streamsHolder[0] = new KafkaStreams(
+        topology,
+        streamsProps,
+        pending -> grantPendingPrivilegeRequest(SERVICE_APP_ID, streamsHolder[0], pending));
+    final KafkaStreams streams = streamsHolder[0];
     metadataService = new MetadataService(streams);
     streams.cleanUp(); //don't do this in prod as it clears your state stores
     final CountDownLatch startLatch = new CountDownLatch(1);
@@ -358,7 +375,6 @@ public class OrdersService implements Service {
 
     });
     streams.start();
-
     try {
       if (!startLatch.await(60, TimeUnit.SECONDS)) {
         throw new RuntimeException("Streams never finished rebalancing on startup");
