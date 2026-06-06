@@ -48,9 +48,9 @@ public class OrderDetailsService implements Service {
   public void start(final String bootstrapServers,
                     final String stateDir,
                     final Properties defaultConfig) {
-    streams = processStreams(bootstrapServers, stateDir, defaultConfig);
     registerDifcClient(SERVICE_APP_ID, bootstrapServers, defaultConfig);
     createDifcTag(SERVICE_APP_ID, DIFC_VALIDATION_TAG, bootstrapServers, defaultConfig);
+    streams = processStreams(bootstrapServers, stateDir, defaultConfig);
 
     final CountDownLatch startLatch = new CountDownLatch(1);
     streams.setStateListener((newState, oldState) -> {
@@ -68,8 +68,8 @@ public class OrderDetailsService implements Service {
       Thread.currentThread().interrupt();
     }
 
-    requestDifcGrantCapAddAndRemove(SERVICE_APP_ID, streams, DIFC_ORDER_TAG);
     addDifcTagToClientLabel(SERVICE_APP_ID, streams, DIFC_VALIDATION_TAG);
+    requestDifcGrantCapAddAndRemove(SERVICE_APP_ID, streams, DIFC_ORDER_TAG);
 
     log.info("Started Service " + getClass().getSimpleName());
   }
@@ -107,13 +107,15 @@ public class OrderDetailsService implements Service {
                   : failReason);
           return validation;
         })
+        .declassifyTags(difcTagSet(DIFC_ORDER_TAG))
         .addTags(difcTagSet(DIFC_VALIDATION_TAG))
         .to(Topics.ORDER_VALIDATIONS.name(),
             Produced.with(Topics.ORDER_VALIDATIONS.keySerde(), Topics.ORDER_VALIDATIONS.valueSerde()));
 
-    return new KafkaStreams(
+    return kafkaStreamsWithAutoGrant(
         builder.build(),
-        baseStreamsConfig(bootstrapServers, stateDir, SERVICE_APP_ID, defaultConfig));
+        baseStreamsConfig(bootstrapServers, stateDir, SERVICE_APP_ID, defaultConfig),
+        SERVICE_APP_ID);
   }
 
   /**

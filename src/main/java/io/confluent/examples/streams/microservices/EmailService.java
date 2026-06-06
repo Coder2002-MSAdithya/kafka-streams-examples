@@ -44,6 +44,8 @@ public class EmailService implements Service {
 
   private static final Logger log = LoggerFactory.getLogger(EmailService.class);
   private final String SERVICE_APP_ID = getClass().getSimpleName();
+  /** Tag on {@code orders} from OrdersService; email-svc needs it on the label to consume tagged orders. */
+  private static final String DIFC_ORDER_TAG = "order";
 
   private KafkaStreams streams;
   private final Emailer emailer;
@@ -56,9 +58,8 @@ public class EmailService implements Service {
   public void start(final String bootstrapServers,
                     final String stateDir,
                     final Properties defaultConfig) {
-    streams = processStreams(bootstrapServers, stateDir, defaultConfig);
-    streams.cleanUp(); //don't do this in prod as it clears your state stores
     registerDifcClient(SERVICE_APP_ID, bootstrapServers, defaultConfig);
+    streams = processStreams(bootstrapServers, stateDir, defaultConfig);
     final CountDownLatch startLatch = new CountDownLatch(1);
     streams.setStateListener((newState, oldState) -> {
       if (newState == State.RUNNING && oldState != KafkaStreams.State.RUNNING) {
@@ -74,6 +75,9 @@ public class EmailService implements Service {
     } catch (final InterruptedException e) {
        Thread.currentThread().interrupt();
     }
+
+    requestDifcGrantCapAddAndRemove(SERVICE_APP_ID, streams, DIFC_ORDER_TAG);
+
     log.info("Started Service " + SERVICE_APP_ID);
 
   }
@@ -87,10 +91,8 @@ public class EmailService implements Service {
     //Create the streams/tables for the join
     final KStream<String, Order> orders = builder.stream(ORDERS.name(),
         Consumed.with(ORDERS.keySerde(), ORDERS.valueSerde()))
-        .filter((id, order) -> isNotTombstone(id, order))
-        .peek((id, order) -> System.out.printf(
-            "[EmailService] Received order id=%s state=%s customer=%s%n",
-            id, order.getState(), order.getCustomerId()));
+        .peek((id, order) -> logOrderIntake(SERVICE_APP_ID, id, order))
+        .filter((id, order) -> isNotTombstone(id, order));
     final KStream<String, Payment> payments = builder.stream(PAYMENTS.name(),
         Consumed.with(PAYMENTS.keySerde(), PAYMENTS.valueSerde()))
         .filter((id, payment) -> isNotTombstone(id, payment))

@@ -19,6 +19,7 @@ import org.apache.kafka.common.message.GrantCapResponseData;
 import org.apache.kafka.common.message.PollPrivsReqResponseData;
 import org.apache.kafka.common.message.RegisterClientResponseData;
 import org.apache.kafka.streams.KafkaStreams;
+import org.apache.kafka.streams.Topology;
 import org.apache.kafka.streams.difc.DifcPrivilegeRequestHandler;
 import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.common.serialization.Serde;
@@ -297,6 +298,15 @@ public class MicroserviceUtils {
         topic.valueSerde().serializer());
   }
 
+  private static void requireDifcOk(final int errorCode,
+                                    final String operation,
+                                    final String detail) {
+    if (errorCode != 0) {
+      throw new IllegalStateException(
+          operation + " failed with errorCode=" + errorCode + (detail.isEmpty() ? "" : ": " + detail));
+    }
+  }
+
   public static void registerDifcClient(final String serviceName,
                                         final String bootstrapServers,
                                         final Properties defaultConfig) {
@@ -314,12 +324,19 @@ public class MicroserviceUtils {
           serviceName,
           response.errorCode(),
           response.errorMessage());
+      requireDifcOk(response.errorCode(), "registerClient(" + serviceName + ")", response.errorMessage());
     }
   }
 
-  /** Single-tag set for {@link org.apache.kafka.streams.kstream.KStream#addTags(Set)}. */
-  public static Set<String> difcTagSet(final String tagName) {
-    return Collections.singleton(tagName);
+  /** Tag name set for {@link org.apache.kafka.streams.kstream.KStream#addTags(Set)} / {@code declassifyTags}. */
+  public static Set<String> difcTagSet(final String... tagNames) {
+    if (tagNames == null || tagNames.length == 0) {
+      return Collections.emptySet();
+    }
+    if (tagNames.length == 1) {
+      return Collections.singleton(tagNames[0]);
+    }
+    return Set.of(tagNames);
   }
 
   /**
@@ -335,6 +352,11 @@ public class MicroserviceUtils {
         tagName,
         labelResponse.errorCode(),
         labelResponse.errorMessage());
+    if (labelResponse.errorCode() != 0) {
+      throw new IllegalStateException(
+          "addTagToLabel(" + serviceName + ", " + tagName + ") failed with errorCode="
+              + labelResponse.errorCode() + ": " + labelResponse.errorMessage());
+    }
   }
 
   /**
@@ -352,6 +374,20 @@ public class MicroserviceUtils {
         capability,
         response.errorCode(),
         response.errorMessage());
+    requireDifcOk(
+        response.errorCode(),
+        "requestGrantCap(" + serviceName + ", " + tagName + ", " + capability + ")",
+        response.errorMessage());
+  }
+
+  /**
+   * Request {@code CAN_ADD}/{@code CAN_REMOVE} on a tag owned by another client (no label change).
+   */
+  public static void requestDifcGrantCapOnly(final String serviceName,
+                                             final KafkaStreams streams,
+                                             final String tagName) {
+    requestDifcGrantCap(serviceName, streams, tagName, Capability.CAN_ADD);
+    requestDifcGrantCap(serviceName, streams, tagName, Capability.CAN_REMOVE);
   }
 
   /**
@@ -362,9 +398,25 @@ public class MicroserviceUtils {
   public static void requestDifcGrantCapAddAndRemove(final String serviceName,
                                                      final KafkaStreams streams,
                                                      final String tagName) {
-    requestDifcGrantCap(serviceName, streams, tagName, Capability.CAN_ADD);
-    requestDifcGrantCap(serviceName, streams, tagName, Capability.CAN_REMOVE);
-    addDifcTagToClientLabel(serviceName, streams, tagName);
+    requestDifcGrantCapOnly(serviceName, streams, tagName);
+    // Grants are applied asynchronously by the tag owner; retry until label add succeeds.
+    final int maxAttempts = 15;
+    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        addDifcTagToClientLabel(serviceName, streams, tagName);
+        return;
+      } catch (final IllegalStateException e) {
+        if (attempt == maxAttempts) {
+          throw e;
+        }
+        try {
+          Thread.sleep(2000L);
+        } catch (final InterruptedException ie) {
+          Thread.currentThread().interrupt();
+          throw new IllegalStateException("Interrupted waiting for DIFC grant on tag " + tagName, ie);
+        }
+      }
+    }
   }
 
   public static Capability capabilityFromPollResponse(final byte capability) {
@@ -407,6 +459,20 @@ public class MicroserviceUtils {
     return pending -> grantPendingPrivilegeRequest(serviceName, streams, pending);
   }
 
+  /**
+   * {@link KafkaStreams} that auto-approves incoming {@code GRANT_CAP} requests (tag owners only).
+   */
+  public static KafkaStreams kafkaStreamsWithAutoGrant(final Topology topology,
+                                                       final Properties props,
+                                                       final String serviceName) {
+    final KafkaStreams[] holder = new KafkaStreams[1];
+    holder[0] = new KafkaStreams(
+        topology,
+        props,
+        pending -> grantPendingPrivilegeRequest(serviceName, holder[0], pending));
+    return holder[0];
+  }
+
   public static void createDifcTag(final String serviceName,
                                    final String tagName,
                                    final String bootstrapServers,
@@ -425,6 +491,10 @@ public class MicroserviceUtils {
           serviceName,
           tagName,
           response.errorCode(),
+          response.errorMessage());
+      requireDifcOk(
+          response.errorCode(),
+          "createTag(" + serviceName + ", " + tagName + ")",
           response.errorMessage());
     }
   }

@@ -90,7 +90,7 @@ public class AddInventory {
                 })
                 .orElse(new Properties());
 
-        registerDifcClient("AddInventory", bootstrapServers, defaultConfig);
+        // inventory-svc is registered by InventoryService; this one-shot producer reuses that principal.
 
         // Send Inventory
         final List<KeyValue<Product, Integer>> inventory = asList(

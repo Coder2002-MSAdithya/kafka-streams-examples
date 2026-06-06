@@ -32,6 +32,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -45,6 +46,15 @@ public class ValidationsAggregatorService implements Service {
 
   private static final Logger log = LoggerFactory.getLogger(ValidationsAggregatorService.class);
   private final String SERVICE_APP_ID = getClass().getSimpleName();
+  /** Validation tags on {@code order-validations} from Fraud/Inventory/OrderDetails. */
+  private static final String DIFC_TAG_FRAUD = "fraud";
+  private static final String DIFC_TAG_INV_VALID = "inv-valid";
+  private static final String DIFC_TAG_ORDER_VALID = "order-valid";
+  /** Tags stripped from {@code orders} output (label + record union minus declassify header). */
+  private static final Set<String> DIFC_OUTPUT_DECLASSIFY_TAGS = difcTagSet(
+      DIFC_TAG_FRAUD, DIFC_TAG_INV_VALID, DIFC_TAG_ORDER_VALID, "order");
+  /** Tag on {@code orders} from OrdersService; needed to read/join tagged orders. */
+  private static final String DIFC_ORDER_TAG = "order";
   private final Consumed<String, OrderValidation> serdes1 = Consumed
       .with(ORDER_VALIDATIONS.keySerde(), ORDER_VALIDATIONS.valueSerde());
   private final Consumed<String, Order> serdes2 = Consumed.with(ORDERS.keySerde(),
@@ -67,9 +77,8 @@ public class ValidationsAggregatorService implements Service {
                     final String stateDir,
                     final Properties defaultConfig) {
     final CountDownLatch startLatch = new CountDownLatch(1);
-    streams = aggregateOrderValidations(bootstrapServers, stateDir, defaultConfig);
-    streams.cleanUp(); //don't do this in prod as it clears your state stores
     registerDifcClient(SERVICE_APP_ID, bootstrapServers, defaultConfig);
+    streams = aggregateOrderValidations(bootstrapServers, stateDir, defaultConfig);
 
     streams.setStateListener((newState, oldState) -> {
       if (newState == KafkaStreams.State.RUNNING && oldState != KafkaStreams.State.RUNNING) {
@@ -87,7 +96,16 @@ public class ValidationsAggregatorService implements Service {
       Thread.currentThread().interrupt();
     }
 
+    setupDifcPrivileges(streams);
+
     log.info("Started Service " + getClass().getSimpleName());
+  }
+
+  private void setupDifcPrivileges(final KafkaStreams streams) {
+    requestDifcGrantCapAddAndRemove(SERVICE_APP_ID, streams, DIFC_TAG_FRAUD);
+    requestDifcGrantCapAddAndRemove(SERVICE_APP_ID, streams, DIFC_TAG_INV_VALID);
+    requestDifcGrantCapAddAndRemove(SERVICE_APP_ID, streams, DIFC_TAG_ORDER_VALID);
+    requestDifcGrantCapAddAndRemove(SERVICE_APP_ID, streams, DIFC_ORDER_TAG);
   }
 
   private KafkaStreams aggregateOrderValidations(
@@ -107,7 +125,7 @@ public class ValidationsAggregatorService implements Service {
         .filter((id, order) -> isLiveCreatedOrder(id, order));
 
     //If all rules pass then validate the order
-    validations
+    final KStream<String, Order> validatedOrders = validations
         .groupByKey(serdes3)
         .windowedBy(SessionWindows.ofInactivityGapWithNoGrace(Duration.ofMinutes(5)))
         .aggregate(
@@ -132,12 +150,10 @@ public class ValidationsAggregatorService implements Service {
                     validatedOrder.getState(),
                     numberOfRules);
                 return validatedOrder;
-            }, JoinWindows.ofTimeDifferenceWithNoGrace(Duration.ofMinutes(5)), serdes4)
-        //Push the validated order into the orders topic
-        .to(ORDERS.name(), serdes5);
+            }, JoinWindows.ofTimeDifferenceWithNoGrace(Duration.ofMinutes(5)), serdes4);
 
     //If any rule fails then fail the order
-    validations.filter((id, rule) -> isLiveFailedValidation(id, rule))
+    final KStream<String, Order> failedOrders = validations.filter((id, rule) -> isLiveFailedValidation(id, rule))
         .join(orders, (id, order) -> {
                 final Order failedOrder = newBuilder(order).setState(OrderState.FAILED).build();
                 System.out.printf(
@@ -150,10 +166,14 @@ public class ValidationsAggregatorService implements Service {
         //there could be multiple failed rules for each order so collapse to a single order
         .groupByKey(serdes6)
         .reduce((order, v1) -> order)
-        //Push the validated order into the orders topic
-        .toStream().to(ORDERS.name(), Produced.with(ORDERS.keySerde(), ORDERS.valueSerde()));
+        .toStream();
 
-    return new KafkaStreams(builder.build(),
+    validatedOrders.merge(failedOrders)
+        .declassifyTags(DIFC_OUTPUT_DECLASSIFY_TAGS)
+        .to(ORDERS.name(), serdes5);
+
+    return new KafkaStreams(
+        builder.build(),
         baseStreamsConfig(bootstrapServers, stateDir, SERVICE_APP_ID, defaultConfig));
   }
 

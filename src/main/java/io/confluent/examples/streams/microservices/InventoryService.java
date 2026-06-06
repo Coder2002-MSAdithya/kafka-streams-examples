@@ -66,10 +66,9 @@ public class InventoryService implements Service {
   public void start(final String bootstrapServers,
                     final String stateDir,
                     final Properties defaultConfig) {
-    streams = processStreams(bootstrapServers, stateDir, defaultConfig);
-    streams.cleanUp(); //don't do this in prod as it clears your state stores
     registerDifcClient(SERVICE_APP_ID, bootstrapServers, defaultConfig);
     createDifcTag(SERVICE_APP_ID, DIFC_VALIDATION_TAG, bootstrapServers, defaultConfig);
+    streams = processStreams(bootstrapServers, stateDir, defaultConfig);
     final CountDownLatch startLatch = new CountDownLatch(1);
     streams.setStateListener((newState, oldState) -> {
       if (newState == State.RUNNING && oldState != KafkaStreams.State.RUNNING) {
@@ -87,8 +86,8 @@ public class InventoryService implements Service {
       Thread.currentThread().interrupt();
     }
 
-    requestDifcGrantCapAddAndRemove(SERVICE_APP_ID, streams, DIFC_ORDER_TAG);
     addDifcTagToClientLabel(SERVICE_APP_ID, streams, DIFC_VALIDATION_TAG);
+    requestDifcGrantCapAddAndRemove(SERVICE_APP_ID, streams, DIFC_ORDER_TAG);
 
     log.info("Started Service " + getClass().getSimpleName());
   }
@@ -132,12 +131,15 @@ public class InventoryService implements Service {
         Topics.ORDERS.valueSerde(), Serdes.Integer()))
       //Validate the order based on how much stock we have both in the warehouse and locally 'reserved' stock
       .process(InventoryValidator::new, RESERVED_STOCK_STORE_NAME)
+      .declassifyTags(difcTagSet(DIFC_ORDER_TAG))
       .addTags(difcTagSet(DIFC_VALIDATION_TAG))
       .to(Topics.ORDER_VALIDATIONS.name(), Produced.with(Topics.ORDER_VALIDATIONS.keySerde(),
         Topics.ORDER_VALIDATIONS.valueSerde()));
 
-    return new KafkaStreams(builder.build(),
-      MicroserviceUtils.baseStreamsConfig(bootstrapServers, stateDir, SERVICE_APP_ID, defaultConfig));
+    return kafkaStreamsWithAutoGrant(
+        builder.build(),
+        MicroserviceUtils.baseStreamsConfig(bootstrapServers, stateDir, SERVICE_APP_ID, defaultConfig),
+        SERVICE_APP_ID);
   }
 
   private static class InventoryValidator implements

@@ -27,7 +27,6 @@ import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.util.Properties;
-import java.util.Set;
 
 import static io.confluent.examples.streams.avro.microservices.OrderValidationResult.FAIL;
 import static io.confluent.examples.streams.avro.microservices.OrderValidationResult.PASS;
@@ -51,19 +50,17 @@ public class FraudService implements Service {
   private static final int FRAUD_LIMIT = 2000;
   /** Tag on {@code orders} records produced by OrdersService; fraud-svc needs CAN_ADD and CAN_REMOVE. */
   private static final String DIFC_ORDER_TAG = "order";
-  /** Tag owned by this service; attached to {@code order-validations} output via {@code KStream#addTags}. */
+  /** Tag owned by this service; attached to {@code order-validations} output via {@code addTags}. */
   private static final String DIFC_VALIDATION_TAG = "fraud";
-  private static final Set<String> DIFC_VALIDATION_OUTPUT_TAGS = difcTagSet(DIFC_VALIDATION_TAG);
   private KafkaStreams streams;
 
   @Override
   public void start(final String bootstrapServers,
                     final String stateDir,
                     final Properties defaultConfig) {
-    streams = processStreams(bootstrapServers, stateDir, defaultConfig);
-    streams.cleanUp(); //don't do this in prod as it clears your state stores
     registerDifcClient(SERVICE_APP_ID, bootstrapServers, defaultConfig);
     createDifcTag(SERVICE_APP_ID, DIFC_VALIDATION_TAG, bootstrapServers, defaultConfig);
+    streams = processStreams(bootstrapServers, stateDir, defaultConfig);
     final CountDownLatch startLatch = new CountDownLatch(1);
     streams.setStateListener((newState, oldState) -> {
       if (newState == State.RUNNING && oldState != KafkaStreams.State.RUNNING) {
@@ -81,8 +78,8 @@ public class FraudService implements Service {
       Thread.currentThread().interrupt();
     }
 
-    requestDifcGrantCapAddAndRemove(SERVICE_APP_ID, streams, DIFC_ORDER_TAG);
     addDifcTagToClientLabel(SERVICE_APP_ID, streams, DIFC_VALIDATION_TAG);
+    requestDifcGrantCapAddAndRemove(SERVICE_APP_ID, streams, DIFC_ORDER_TAG);
 
     log.info("Started Service " + getClass().getSimpleName());
   }
@@ -122,7 +119,7 @@ public class FraudService implements Service {
         .branch((id, orderValue) -> orderValue.getValue() < FRAUD_LIMIT, Branched.as("below"))
         .noDefaultBranch();
 
-    final KStream<String, OrderValidation> aboveLimit = forks.get("limit-above").mapValues(orderValue -> {
+    final KStream<String, OrderValidation> failedValidations = forks.get("limit-above").mapValues(orderValue -> {
       final OrderValidation validation = new OrderValidation(orderValue.getOrder().getId(), FRAUD_CHECK, FAIL);
       logValidationDecision(
           SERVICE_APP_ID,
@@ -137,7 +134,7 @@ public class FraudService implements Service {
       return validation;
     });
 
-    final KStream<String, OrderValidation> belowLimit = forks.get("limit-below").mapValues(orderValue -> {
+    final KStream<String, OrderValidation> passedValidations = forks.get("limit-below").mapValues(orderValue -> {
       final OrderValidation validation = new OrderValidation(orderValue.getOrder().getId(), FRAUD_CHECK, PASS);
       logValidationDecision(
           SERVICE_APP_ID,
@@ -152,8 +149,9 @@ public class FraudService implements Service {
       return validation;
     });
 
-    aboveLimit.merge(belowLimit)
-        .addTags(DIFC_VALIDATION_OUTPUT_TAGS)
+    failedValidations.merge(passedValidations)
+        .declassifyTags(difcTagSet(DIFC_ORDER_TAG))
+        .addTags(difcTagSet(DIFC_VALIDATION_TAG))
         .to(ORDER_VALIDATIONS.name(), Produced
             .with(ORDER_VALIDATIONS.keySerde(), ORDER_VALIDATIONS.valueSerde()));
 
@@ -164,7 +162,7 @@ public class FraudService implements Service {
     final Properties props = baseStreamsConfig(bootstrapServers, stateDir, SERVICE_APP_ID, defaultConfig);
     props.setProperty(StreamsConfig.STATESTORE_CACHE_MAX_BYTES_CONFIG, "0");
 
-    return new KafkaStreams(builder.build(), props);
+    return kafkaStreamsWithAutoGrant(builder.build(), props, SERVICE_APP_ID);
   }
 
   private OrderValue simpleMerge(final OrderValue a, final OrderValue b) {

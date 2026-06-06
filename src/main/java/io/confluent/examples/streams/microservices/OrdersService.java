@@ -366,7 +366,6 @@ public class OrdersService implements Service {
         pending -> grantPendingPrivilegeRequest(SERVICE_APP_ID, streamsHolder[0], pending));
     final KafkaStreams streams = streamsHolder[0];
     metadataService = new MetadataService(streams);
-    streams.cleanUp(); //don't do this in prod as it clears your state stores
     final CountDownLatch startLatch = new CountDownLatch(1);
     streams.setStateListener((newState, oldState) -> {
       if (newState == State.RUNNING && oldState != KafkaStreams.State.RUNNING) {

@@ -83,9 +83,9 @@ Suggested order:
 ./start-inventory-service.sh
 ./start-order-details-service.sh
 ./start-validations-aggregator-service.sh
-./start-orders-service.sh          # REST http://localhost:5432/v1/orders
+./start-orders-service.sh          # REST http://localhost:5432/v1/orders (creates DIFC tag "order")
 ./start-add-inventory.sh           # one-shot, then exit
-# optional:
+# optional (start after orders-svc so GRANT_CAP on tag "order" succeeds):
 ./start-email-service.sh
 ```
 
@@ -108,3 +108,13 @@ Use `broker.standalone.properties` with `kafka-storage.sh format --standalone` a
 ## DIFC
 
 DIFC `registerDifcClient` uses the authenticated SCRAM principal name (e.g. `orders-svc`). Idle `POLL_PRIVS_REQ` lines (`capability=-1`) are normal when no capability requests are queued.
+
+`OrdersService` owns the `order` tag and auto-grants `CAN_ADD`/`CAN_REMOVE` to validators, `EmailService`, and `ValidationsAggregatorService` via `addClientPrivs` when they call `requestGrantCap` at startup.
+
+Fraud, Inventory, and OrderDetails own `fraud`, `inv-valid`, and `order-valid` respectively and auto-grant those tags to `ValidationsAggregatorService` the same way.
+
+Start **OrdersService before** other services so the `order` tag exists. Start **validators before** the aggregator and Email so validation tags exist and auto-grants succeed.
+
+DIFC setup assumes a **fresh** cluster/controller image (no pre-existing DIFC clients or tags for these principals). `registerClient` and `createTag` fail fast on duplicate state; wipe KRaft storage or use a new cluster before re-running the workflow.
+
+Validators publish to `order-validations` with **no tags** (`.declassifyTags("order")` only; validation tags are not on the client label). Consumers that read tagged `orders` add only the `order` tag to their label after `requestGrantCap`. The aggregator writes `orders` with the `order` tag only.
