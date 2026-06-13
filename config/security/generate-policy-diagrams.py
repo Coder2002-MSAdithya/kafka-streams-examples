@@ -36,6 +36,10 @@ HIGH_LEVEL_OP_ORDER = [
 ]
 
 
+def topic_name(node: dict) -> str:
+    return str(node.get("topic") or "")
+
+
 def load_policy(policy_file: Path) -> dict | None:
     if not policy_file.is_file():
         return None
