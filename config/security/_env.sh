@@ -22,6 +22,9 @@ export BOOTSTRAP_SERVERS="${BOOTSTRAP_SERVERS:-localhost:9092,localhost:9094}"
 
 export KAFKA_OPTS="-Djava.security.auth.login.config=${JAAS_CONFIG}"
 
+# Shared directory for agent-exported processing policies (grant-time CAN_REMOVE verification).
+export DIFC_POLICY_REGISTRY_DIR="${DIFC_POLICY_REGISTRY_DIR:-/tmp/kafka-streams-examples/policy}"
+
 # Project version (not parent POM version); used for standalone JAR path
 PROJECT_VERSION="$(awk '/<artifactId>kafka-streams-examples<\/artifactId>/{found=1} found && /<version>/{gsub(/.*<version>|<\/version>.*/,""); print; exit}' "${EXAMPLES_HOME}/pom.xml")"
 STANDALONE_JAR="${EXAMPLES_HOME}/target/kafka-streams-examples-${PROJECT_VERSION}-standalone.jar"

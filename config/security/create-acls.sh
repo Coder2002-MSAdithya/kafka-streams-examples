@@ -22,6 +22,9 @@ USERS=(
   order-details-svc
   validations-agg-svc
   email-svc
+  ms-orders-svc
+  ms-payment-svc
+  ms-stock-svc
 )
 
 for user in "${USERS[@]}"; do

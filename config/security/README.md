@@ -107,14 +107,20 @@ Use `broker.standalone.properties` with `kafka-storage.sh format --standalone` a
 
 ## DIFC
 
-DIFC `registerDifcClient` uses the authenticated SCRAM principal name (e.g. `orders-svc`). Idle `POLL_PRIVS_REQ` lines (`capability=-1`) are normal when no capability requests are queued.
+DIFC `registerDifcClient` and `createDifcTag` use the running `KafkaStreams` instance (shared DIFC producer) after the app reaches `RUNNING`. Registration uses the authenticated SCRAM principal name (e.g. `orders-svc`). Idle `POLL_PRIVS_REQ` lines (`capability=-1`) are normal when no capability requests are queued.
 
-`OrdersService` owns the `order` tag and auto-grants `CAN_ADD`/`CAN_REMOVE` to validators, `EmailService`, and `ValidationsAggregatorService` via `addClientPrivs` when they call `requestGrantCap` at startup.
+Grant requests are validated in `DifcGrantPolicy` before `addClientPrivs`:
 
-Fraud, Inventory, and OrderDetails own `fraud`, `inv-valid`, and `order-valid` respectively and auto-grant those tags to `ValidationsAggregatorService` the same way.
+| Tag owner | Tag | Requester | CAN_ADD | CAN_REMOVE |
+|-----------|-----|-----------|---------|------------|
+| `orders-svc` | `order` | `fraud-svc`, `inventory-svc`, `order-details-svc`, `validations-agg-svc` | yes | yes (declassify on produce) |
+| `orders-svc` | `order` | `email-svc` | yes | no (consume/join only) |
+| `fraud-svc` | `fraud` | `validations-agg-svc` | yes | yes |
+| `inventory-svc` | `inv-valid` | `validations-agg-svc` | yes | yes |
+| `order-details-svc` | `order-valid` | `validations-agg-svc` | yes | yes |
 
-Start **OrdersService before** other services so the `order` tag exists. Start **validators before** the aggregator and Email so validation tags exist and auto-grants succeed.
+Validators publish to `order-validations` with `.declassifyTags("order")` and `.addTags(validation-tag)`. The aggregator reads validation tags plus `order`, then writes `orders` with `.declassifyTags(fraud, inv-valid, order-valid, order)` — it needs **both** `CAN_ADD` and `CAN_REMOVE` on all four tags.
+
+Start **OrdersService before** other services so the `order` tag exists. Start **validators before** the aggregator and Email so validation tags exist and grants succeed.
 
 DIFC setup assumes a **fresh** cluster/controller image (no pre-existing DIFC clients or tags for these principals). `registerClient` and `createTag` fail fast on duplicate state; wipe KRaft storage or use a new cluster before re-running the workflow.
-
-Validators publish to `order-validations` with **no tags** (`.declassifyTags("order")` only; validation tags are not on the client label). Consumers that read tagged `orders` add only the `order` tag to their label after `requestGrantCap`. The aggregator writes `orders` with the `order` tag only.
