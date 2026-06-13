@@ -1,7 +1,8 @@
 package io.confluent.examples.streams.microservices;
 
-import io.confluent.examples.streams.avro.microservices.OrderState;
 import io.confluent.examples.streams.avro.microservices.Product;
+import io.confluent.examples.streams.microservices.domain.ProductCatalog;
+import io.confluent.examples.streams.microservices.domain.beans.CreateOrderRequestBean;
 import io.confluent.examples.streams.microservices.domain.beans.OrderBean;
 import io.confluent.examples.streams.microservices.util.Paths;
 import org.apache.commons.cli.CommandLine;
@@ -23,14 +24,13 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
-import java.util.stream.Collectors;
+import java.util.Map;
 
 import static jakarta.ws.rs.core.MediaType.APPLICATION_JSON_TYPE;
 
 /**
- * Posts a single order to OrdersService REST API ({@code POST /v1/orders}),
- * using the same JAX-RS client flow as {@link PostOrdersAndPayments}.
+ * Posts a single order to OrdersService REST API ({@code POST /v1/orders}).
+ * Order id and unit price are assigned by the server from {@link ProductCatalog}.
  */
 public class PostOrderInteractive {
 
@@ -67,20 +67,19 @@ public class PostOrderInteractive {
         new InputStreamReader(System.in, StandardCharsets.UTF_8));
 
     System.out.println("Submit an order to OrdersService at " + orderServiceUrl);
-    System.out.println("Products: " + enumNames(Product.values()));
-    System.out.println("States:   " + enumNames(OrderState.values()) + " (new orders usually CREATED)");
+    System.out.println("Order id and price are assigned by the server.");
+    System.out.println("Products (fixed unit prices):");
+    for (final Map.Entry<Product, Double> entry : ProductCatalog.unitPrices().entrySet()) {
+      System.out.printf("  %-12s $%.2f%n", entry.getKey().name(), entry.getValue());
+    }
     System.out.println();
 
-    final String id = prompt(in, "Order id", "1");
     final long customerId = Long.parseLong(prompt(in, "Customer id", "0"));
-    final OrderState state = OrderState.valueOf(
-        prompt(in, "State", OrderState.CREATED.name()).toUpperCase());
     final Product product = Product.valueOf(
         prompt(in, "Product", Product.JUMPERS.name()).toUpperCase());
     final int quantity = Integer.parseInt(prompt(in, "Quantity", "1"));
-    final double price = Double.parseDouble(prompt(in, "Price", "99.99"));
 
-    final OrderBean order = new OrderBean(id, customerId, state, product, quantity, price);
+    final CreateOrderRequestBean request = new CreateOrderRequestBean(customerId, product, quantity);
     final Paths paths = new Paths(orderServiceUrl);
 
     final ClientConfig clientConfig = new ClientConfig();
@@ -95,7 +94,7 @@ public class PostOrderInteractive {
       final Response response = client.target(postUrl)
           .queryParam("timeout", timeoutMs)
           .request(APPLICATION_JSON_TYPE)
-          .post(Entity.json(order));
+          .post(Entity.json(request));
 
       final int status = response.getStatus();
       System.out.printf("POST response: %d %s%n", status, response.getStatusInfo().getReasonPhrase());
@@ -106,22 +105,40 @@ public class PostOrderInteractive {
       if (!body.isEmpty()) {
         System.out.println(body);
       }
-      response.close();
 
       if (status < 200 || status >= 300) {
+        response.close();
         System.exit(1);
       }
 
-      if (getAfterPost) {
-        final String getUrl = paths.urlGet(id);
+      final String orderId = orderIdFromLocation(response);
+      response.close();
+
+      if (orderId == null) {
+        System.err.println("Warning: POST succeeded but Location header did not contain an order id.");
+      } else {
+        System.out.println("Assigned order id: " + orderId);
+      }
+
+      if (getAfterPost && orderId != null) {
+        final String getUrl = paths.urlGet(orderId);
         System.out.printf("%nGET %s (timeout=%d ms) ...%n", getUrl, timeoutMs);
         final OrderBean returned = client.target(getUrl)
             .queryParam("timeout", timeoutMs)
             .request(APPLICATION_JSON_TYPE)
             .get(orderBeanType());
         System.out.println("Returned order: " + returned);
-        if (!order.equals(returned)) {
-          System.out.println("Warning: returned order does not match what was posted.");
+        if (!orderId.equals(returned.getId())) {
+          System.out.println("Warning: returned order id does not match Location header.");
+        }
+        if (returned.getProduct() != product || returned.getCustomerId() != customerId
+            || returned.getQuantity() != quantity) {
+          System.out.println("Warning: returned order fields do not match the request.");
+        }
+        final double expectedPrice = ProductCatalog.unitPrice(product);
+        if (Double.compare(returned.getPrice(), expectedPrice) != 0) {
+          System.out.printf("Warning: expected server price %.2f but got %.2f%n",
+              expectedPrice, returned.getPrice());
         }
       }
     } finally {
@@ -129,8 +146,16 @@ public class PostOrderInteractive {
     }
   }
 
-  private static String enumNames(final Enum<?>[] values) {
-    return Arrays.stream(values).map(Enum::name).collect(Collectors.joining(", "));
+  private static String orderIdFromLocation(final Response response) {
+    if (response.getLocation() == null) {
+      return null;
+    }
+    final String path = response.getLocation().getPath();
+    final int lastSlash = path.lastIndexOf('/');
+    if (lastSlash < 0 || lastSlash == path.length() - 1) {
+      return null;
+    }
+    return path.substring(lastSlash + 1);
   }
 
   private static String prompt(final BufferedReader in, final String label, final String defaultValue)

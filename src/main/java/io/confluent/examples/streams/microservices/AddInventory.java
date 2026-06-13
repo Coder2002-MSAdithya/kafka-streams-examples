@@ -17,6 +17,9 @@ import java.util.Properties;
 import java.util.concurrent.ExecutionException;
 
 import static io.confluent.examples.streams.avro.microservices.Product.JUMPERS;
+import static io.confluent.examples.streams.avro.microservices.Product.SCARVES;
+import static io.confluent.examples.streams.avro.microservices.Product.SOCKS;
+import static io.confluent.examples.streams.avro.microservices.Product.STOCKINGS;
 import static io.confluent.examples.streams.avro.microservices.Product.UNDERPANTS;
 import static io.confluent.examples.streams.microservices.util.MicroserviceUtils.*;
 import static java.util.Arrays.asList;
@@ -65,7 +68,13 @@ public class AddInventory {
             .addOption(Option.builder("u")
                 .longOpt("underpants").hasArg().desc("Quantity of underpants to add to inventory").build())
             .addOption(Option.builder("j")
-                .longOpt("jumpers").hasArg().desc("Quantity of jumpers to add to inventory").build());
+                .longOpt("jumpers").hasArg().desc("Quantity of jumpers to add to inventory").build())
+            .addOption(Option.builder("s")
+                .longOpt("stockings").hasArg().desc("Quantity of stockings to add to inventory").build())
+            .addOption(Option.builder("k")
+                .longOpt("socks").hasArg().desc("Quantity of socks to add to inventory").build())
+            .addOption(Option.builder("v")
+                .longOpt("scarves").hasArg().desc("Quantity of scarves to add to inventory").build());
 
         final CommandLine cl = new DefaultParser().parse(opts, args);
 
@@ -77,6 +86,9 @@ public class AddInventory {
 
         final int quantityUnderpants = Integer.parseInt(cl.getOptionValue("u", "20"));
         final int quantityJumpers = Integer.parseInt(cl.getOptionValue("j", "10"));
+        final int quantityStockings = Integer.parseInt(cl.getOptionValue("s", "15"));
+        final int quantitySocks = Integer.parseInt(cl.getOptionValue("k", "25"));
+        final int quantityScarves = Integer.parseInt(cl.getOptionValue("v", "12"));
 
         final String bootstrapServers = cl.getOptionValue("b", DEFAULT_BOOTSTRAP_SERVERS);
 
@@ -95,7 +107,10 @@ public class AddInventory {
         // Send Inventory
         final List<KeyValue<Product, Integer>> inventory = asList(
             new KeyValue<>(UNDERPANTS, quantityUnderpants),
-            new KeyValue<>(JUMPERS, quantityJumpers)
+            new KeyValue<>(JUMPERS, quantityJumpers),
+            new KeyValue<>(STOCKINGS, quantityStockings),
+            new KeyValue<>(SOCKS, quantitySocks),
+            new KeyValue<>(SCARVES, quantityScarves)
         );
         System.out.printf("Send inventory to %s%n", Topics.WAREHOUSE_INVENTORY);
         sendInventory(inventory, Topics.WAREHOUSE_INVENTORY, bootstrapServers, defaultConfig);

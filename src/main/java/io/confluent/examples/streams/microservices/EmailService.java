@@ -58,7 +58,6 @@ public class EmailService implements Service {
   public void start(final String bootstrapServers,
                     final String stateDir,
                     final Properties defaultConfig) {
-    registerDifcClient(SERVICE_APP_ID, bootstrapServers, defaultConfig);
     streams = processStreams(bootstrapServers, stateDir, defaultConfig);
     final CountDownLatch startLatch = new CountDownLatch(1);
     streams.setStateListener((newState, oldState) -> {
@@ -76,7 +75,8 @@ public class EmailService implements Service {
        Thread.currentThread().interrupt();
     }
 
-    requestDifcGrantCapAddAndRemove(SERVICE_APP_ID, streams, DIFC_ORDER_TAG);
+    registerDifcClient(SERVICE_APP_ID, streams);
+    requestDifcGrantCapForConsume(SERVICE_APP_ID, streams, DIFC_ORDER_TAG);
 
     log.info("Started Service " + SERVICE_APP_ID);
 

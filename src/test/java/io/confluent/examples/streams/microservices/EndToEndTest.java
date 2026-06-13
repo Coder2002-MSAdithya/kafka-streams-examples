@@ -2,8 +2,10 @@ package io.confluent.examples.streams.microservices;
 
 import io.confluent.examples.streams.avro.microservices.OrderState;
 import io.confluent.examples.streams.avro.microservices.Product;
+import io.confluent.examples.streams.microservices.domain.ProductCatalog;
 import io.confluent.examples.streams.microservices.domain.Schemas;
 import io.confluent.examples.streams.microservices.domain.Schemas.Topics;
+import io.confluent.examples.streams.microservices.domain.beans.CreateOrderRequestBean;
 import io.confluent.examples.streams.microservices.domain.beans.OrderBean;
 import io.confluent.examples.streams.microservices.util.MicroserviceTestUtils;
 import io.confluent.examples.streams.microservices.util.Paths;
@@ -22,6 +24,7 @@ import jakarta.ws.rs.client.ClientBuilder;
 import jakarta.ws.rs.client.Entity;
 import jakarta.ws.rs.client.Invocation;
 import jakarta.ws.rs.core.GenericType;
+import jakarta.ws.rs.core.Response;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -31,7 +34,6 @@ import java.util.Properties;
 
 import static io.confluent.examples.streams.avro.microservices.Product.JUMPERS;
 import static io.confluent.examples.streams.avro.microservices.Product.UNDERPANTS;
-import static io.confluent.examples.streams.microservices.domain.beans.OrderId.id;
 import static io.confluent.kafka.serializers.AbstractKafkaSchemaSerDeConfig.SCHEMA_REGISTRY_URL_CONFIG;
 import static java.util.Arrays.asList;
 import static jakarta.ws.rs.core.MediaType.APPLICATION_JSON_TYPE;
@@ -50,7 +52,7 @@ public class EndToEndTest extends MicroserviceTestUtils {
 
   @Test
   public void shouldCreateNewOrderAndGetBackValidatedOrder() {
-    final OrderBean inputOrder = new OrderBean(id(1L), 2L, OrderState.CREATED, Product.JUMPERS, 1, 1d);
+    final CreateOrderRequestBean inputOrder = new CreateOrderRequestBean(2L, Product.JUMPERS, 1);
     client = getClient();
 
     //Add inventory required by the inventory service with enough items in stock to pass validation
@@ -60,10 +62,9 @@ public class EndToEndTest extends MicroserviceTestUtils {
     );
     sendInventory(inventory, Topics.WAREHOUSE_INVENTORY);
 
-    //When we POST order and immediately GET on the returned location
-    postWithRetries(client.target(path.urlPost()).request(APPLICATION_JSON_TYPE), Entity.json(inputOrder), 5);
+    final String orderId = postOrderAndGetId(inputOrder);
     final Invocation.Builder builder = client
-      .target(path.urlGetValidated(1))
+      .target(path.urlGetValidated(orderId))
       .queryParam("timeout", Duration.ofMinutes(1).toMillis())
       .request(APPLICATION_JSON_TYPE);
     returnedBean = getWithRetries(builder, newBean(),5);
@@ -85,14 +86,14 @@ public class EndToEndTest extends MicroserviceTestUtils {
 
     //Send ten orders in succession
     for (int i = 0; i < 10; i++) {
-      final OrderBean inputOrder = new OrderBean(id(i), 2L, OrderState.CREATED, Product.JUMPERS, 1, 1d);
+      final CreateOrderRequestBean inputOrder = new CreateOrderRequestBean(2L, Product.JUMPERS, 1);
+      final double expectedPrice = ProductCatalog.unitPrice(Product.JUMPERS);
 
       startTimer();
 
-      //POST & GET order
-      postWithRetries(client.target(path.urlPost()).request(APPLICATION_JSON_TYPE), Entity.json(inputOrder), 5);
+      final String orderId = postOrderAndGetId(inputOrder);
       final Invocation.Builder builder = client
-        .target(path.urlGetValidated(i))
+        .target(path.urlGetValidated(orderId))
         .queryParam("timeout", Duration.ofMinutes(1).toMillis())
         .request(APPLICATION_JSON_TYPE);
       returnedBean = getWithRetries(builder, newBean(),5);
@@ -100,12 +101,12 @@ public class EndToEndTest extends MicroserviceTestUtils {
       endTimer();
 
       assertThat(returnedBean).isEqualTo(new OrderBean(
-        inputOrder.getId(),
+        orderId,
         inputOrder.getCustomerId(),
         OrderState.VALIDATED,
         inputOrder.getProduct(),
         inputOrder.getQuantity(),
-        inputOrder.getPrice()
+        expectedPrice
       ));
     }
   }
@@ -123,14 +124,14 @@ public class EndToEndTest extends MicroserviceTestUtils {
 
     //Send ten orders one after the other
     for (int i = 0; i < 10; i++) {
-      final OrderBean inputOrder = new OrderBean(id(i), 2L, OrderState.CREATED, Product.JUMPERS, 1, 1d);
+      final CreateOrderRequestBean inputOrder = new CreateOrderRequestBean(2L, Product.JUMPERS, 1);
+      final double expectedPrice = ProductCatalog.unitPrice(Product.JUMPERS);
 
       startTimer();
 
-      //POST & GET order
-      postWithRetries(client.target(path.urlPost()).request(APPLICATION_JSON_TYPE), Entity.json(inputOrder), 5);
+      final String orderId = postOrderAndGetId(inputOrder);
       final Invocation.Builder builder = client
-        .target(path.urlGetValidated(i))
+        .target(path.urlGetValidated(orderId))
         .queryParam("timeout", Duration.ofMinutes(1).toMillis())
         .request(APPLICATION_JSON_TYPE);
       returnedBean = getWithRetries(builder, newBean(), 5);
@@ -138,12 +139,12 @@ public class EndToEndTest extends MicroserviceTestUtils {
       endTimer();
 
       assertThat(returnedBean).isEqualTo(new OrderBean(
-        inputOrder.getId(),
+        orderId,
         inputOrder.getCustomerId(),
         OrderState.FAILED,
         inputOrder.getProduct(),
         inputOrder.getQuantity(),
-        inputOrder.getPrice()
+        expectedPrice
       ));
     }
   }
@@ -204,6 +205,29 @@ public class EndToEndTest extends MicroserviceTestUtils {
     if (client != null) {
       client.close();
     }
+  }
+
+  private String postOrderAndGetId(final CreateOrderRequestBean request) {
+    final Response response = postWithRetries(
+        client.target(path.urlPost()).request(APPLICATION_JSON_TYPE), Entity.json(request), 5);
+    final String orderId = orderIdFromLocation(response);
+    response.close();
+    if (orderId == null) {
+      fail("POST did not return an order id in Location header");
+    }
+    return orderId;
+  }
+
+  private static String orderIdFromLocation(final Response response) {
+    if (response.getLocation() == null) {
+      return null;
+    }
+    final String pathValue = response.getLocation().getPath();
+    final int lastSlash = pathValue.lastIndexOf('/');
+    if (lastSlash < 0 || lastSlash == pathValue.length() - 1) {
+      return null;
+    }
+    return pathValue.substring(lastSlash + 1);
   }
 
   private GenericType<OrderBean> newBean() {

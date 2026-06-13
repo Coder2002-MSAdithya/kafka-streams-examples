@@ -77,7 +77,6 @@ public class ValidationsAggregatorService implements Service {
                     final String stateDir,
                     final Properties defaultConfig) {
     final CountDownLatch startLatch = new CountDownLatch(1);
-    registerDifcClient(SERVICE_APP_ID, bootstrapServers, defaultConfig);
     streams = aggregateOrderValidations(bootstrapServers, stateDir, defaultConfig);
 
     streams.setStateListener((newState, oldState) -> {
@@ -96,6 +95,7 @@ public class ValidationsAggregatorService implements Service {
       Thread.currentThread().interrupt();
     }
 
+    registerDifcClient(SERVICE_APP_ID, streams);
     setupDifcPrivileges(streams);
 
     log.info("Started Service " + getClass().getSimpleName());

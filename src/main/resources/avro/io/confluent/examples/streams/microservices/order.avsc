@@ -7,7 +7,7 @@
 {"namespace": "io.confluent.examples.streams.avro.microservices",
  "type": "enum",
  "name": "Product",
- "symbols" : ["JUMPERS", "UNDERPANTS", "STOCKINGS"]
+ "symbols" : ["JUMPERS", "UNDERPANTS", "STOCKINGS", "SOCKS", "SCARVES"]
 },
 {"namespace": "io.confluent.examples.streams.avro.microservices",
  "type": "record",

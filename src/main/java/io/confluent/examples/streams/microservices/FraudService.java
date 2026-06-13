@@ -48,7 +48,7 @@ public class FraudService implements Service {
   private final String SERVICE_APP_ID = getClass().getSimpleName();
 
   private static final int FRAUD_LIMIT = 2000;
-  /** Tag on {@code orders} records produced by OrdersService; fraud-svc needs CAN_ADD and CAN_REMOVE. */
+  /** Tag on {@code orders} records produced by OrdersService; fraud-svc needs CAN_ADD on the label. */
   private static final String DIFC_ORDER_TAG = "order";
   /** Tag owned by this service; attached to {@code order-validations} output via {@code addTags}. */
   private static final String DIFC_VALIDATION_TAG = "fraud";
@@ -58,8 +58,6 @@ public class FraudService implements Service {
   public void start(final String bootstrapServers,
                     final String stateDir,
                     final Properties defaultConfig) {
-    registerDifcClient(SERVICE_APP_ID, bootstrapServers, defaultConfig);
-    createDifcTag(SERVICE_APP_ID, DIFC_VALIDATION_TAG, bootstrapServers, defaultConfig);
     streams = processStreams(bootstrapServers, stateDir, defaultConfig);
     final CountDownLatch startLatch = new CountDownLatch(1);
     streams.setStateListener((newState, oldState) -> {
@@ -78,6 +76,8 @@ public class FraudService implements Service {
       Thread.currentThread().interrupt();
     }
 
+    registerDifcClient(SERVICE_APP_ID, streams);
+    createDifcTag(SERVICE_APP_ID, streams, DIFC_VALIDATION_TAG);
     addDifcTagToClientLabel(SERVICE_APP_ID, streams, DIFC_VALIDATION_TAG);
     requestDifcGrantCapAddAndRemove(SERVICE_APP_ID, streams, DIFC_ORDER_TAG);
 

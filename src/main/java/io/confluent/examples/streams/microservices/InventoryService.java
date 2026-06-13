@@ -66,8 +66,6 @@ public class InventoryService implements Service {
   public void start(final String bootstrapServers,
                     final String stateDir,
                     final Properties defaultConfig) {
-    registerDifcClient(SERVICE_APP_ID, bootstrapServers, defaultConfig);
-    createDifcTag(SERVICE_APP_ID, DIFC_VALIDATION_TAG, bootstrapServers, defaultConfig);
     streams = processStreams(bootstrapServers, stateDir, defaultConfig);
     final CountDownLatch startLatch = new CountDownLatch(1);
     streams.setStateListener((newState, oldState) -> {
@@ -86,6 +84,8 @@ public class InventoryService implements Service {
       Thread.currentThread().interrupt();
     }
 
+    registerDifcClient(SERVICE_APP_ID, streams);
+    createDifcTag(SERVICE_APP_ID, streams, DIFC_VALIDATION_TAG);
     addDifcTagToClientLabel(SERVICE_APP_ID, streams, DIFC_VALIDATION_TAG);
     requestDifcGrantCapAddAndRemove(SERVICE_APP_ID, streams, DIFC_ORDER_TAG);
 

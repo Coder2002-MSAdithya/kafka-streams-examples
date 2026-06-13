@@ -1,9 +1,10 @@
 package io.confluent.examples.streams.microservices;
 
-import io.confluent.examples.streams.avro.microservices.OrderState;
 import io.confluent.examples.streams.avro.microservices.Payment;
 import io.confluent.examples.streams.avro.microservices.Product;
+import io.confluent.examples.streams.microservices.domain.ProductCatalog;
 import io.confluent.examples.streams.microservices.domain.Schemas;
+import io.confluent.examples.streams.microservices.domain.beans.CreateOrderRequestBean;
 import io.confluent.examples.streams.microservices.domain.beans.OrderBean;
 import io.confluent.examples.streams.microservices.util.Paths;
 import io.confluent.kafka.serializers.AbstractKafkaSchemaSerDeConfig;
@@ -27,7 +28,6 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.*;
 
-import static io.confluent.examples.streams.microservices.domain.beans.OrderId.id;
 import static io.confluent.examples.streams.microservices.util.MicroserviceUtils.*;
 import static jakarta.ws.rs.core.MediaType.APPLICATION_JSON_TYPE;
 
@@ -66,7 +66,7 @@ public class PostOrdersAndPayments {
     public static void main(final String[] args) throws Exception {
 
         final int NUM_CUSTOMERS = 6;
-        final List<Product> productTypeList = Arrays.asList(Product.JUMPERS, Product.UNDERPANTS, Product.STOCKINGS);
+        final List<Product> productTypeList = new ArrayList<>(ProductCatalog.unitPrices().keySet());
         final Random randomGenerator = new Random();
 
         final Options opts = new Options();
@@ -78,8 +78,6 @@ public class PostOrdersAndPayments {
                     .longOpt("order-service-url").hasArg().desc("Order Service URL").build())
                 .addOption(Option.builder("c")
                     .longOpt("config-file").hasArg().desc("Java properties file with configurations for Kafka Clients").build())
-               .addOption(Option.builder("n")
-                    .longOpt("order-id").hasArg().desc("The starting order id for posting new orders").build())
                 .addOption(Option.builder("h")
                     .longOpt("help").hasArg(false).desc("Show usage information").build());
 
@@ -92,8 +90,6 @@ public class PostOrdersAndPayments {
 
         final String bootstrapServers = cl.getOptionValue("bootstrap-servers", DEFAULT_BOOTSTRAP_SERVERS);
         final String orderServiceUrl = cl.getOptionValue("order-service-url", "http://localhost:5432");
-        final int startingOrderId = Integer.parseInt(cl.getOptionValue("order-id", "1"));
-
         final Properties defaultConfig = Optional.ofNullable(cl.getOptionValue("config-file", (String) null))
                 .map(path -> {
                     try {
@@ -119,20 +115,16 @@ public class PostOrdersAndPayments {
 
         final KafkaProducer<String, Payment> paymentProducer = buildPaymentProducer(bootstrapServers, defaultConfig);
 
-        // send one order every 1 second
-        int i = startingOrderId;
+        int orderCount = 0;
         while (!Thread.currentThread().isInterrupted()) {
 
             final int randomCustomerId = randomGenerator.nextInt(NUM_CUSTOMERS);
             final Product randomProduct = productTypeList.get(randomGenerator.nextInt(productTypeList.size()));
 
-            final OrderBean inputOrder = new OrderBean(
-                    id(i),
+            final CreateOrderRequestBean inputOrder = new CreateOrderRequestBean(
                     randomCustomerId,
-                    OrderState.CREATED,
                     randomProduct,
-                    1,
-                    1d);
+                    1);
 
             // POST order to OrdersService
             System.out.printf("Posting order to: %s   .... ", path.urlPost());
@@ -142,22 +134,32 @@ public class PostOrdersAndPayments {
                         .post(Entity.json(inputOrder));
                 System.out.printf("Response: %s %n", response.getStatus());
 
+                final String orderId = orderIdFromLocation(response);
+                if (orderId == null) {
+                    System.err.println("POST succeeded but Location header missing order id");
+                    response.close();
+                    continue;
+                }
+
                 // GET the bean back explicitly
-                System.out.printf("Getting order from: %s   .... ", path.urlGet(i));
-                returnedOrder = client.target(path.urlGet(i))
+                System.out.printf("Getting order from: %s   .... ", path.urlGet(orderId));
+                returnedOrder = client.target(path.urlGet(orderId))
                         .queryParam("timeout", Duration.ofMinutes(1).toMillis() / 2)
                         .request(APPLICATION_JSON_TYPE)
                         .get(newBean());
-                if (!inputOrder.equals(returnedOrder)) {
-                    System.out.printf("Posted order %d does not equal returned order: %s%n", i, returnedOrder.toString());
+                response.close();
+                if (returnedOrder.getCustomerId() != randomCustomerId
+                    || returnedOrder.getProduct() != randomProduct
+                    || returnedOrder.getQuantity() != 1) {
+                    System.out.printf("Posted order does not match returned order: %s%n", returnedOrder);
                 } else {
-                    System.out.printf("Posted order %d equals returned order: %s%n", i, returnedOrder);
+                    System.out.printf("Posted order %s equals returned order: %s%n", orderId, returnedOrder);
                 }
 
                 // Send payment
-                final Payment payment = new Payment("Payment:1234", id(i), "CZK", 1000.00d);
+                final Payment payment = new Payment("Payment:1234", orderId, "CZK", 1000.00d);
                 sendPayment(payment.getId(), payment, paymentProducer);
-                i++;
+                orderCount++;
             } catch (final Exception ex) {
                 System.err.printf("Error communicating with Orders Service, retrying shortly. %s", ex.getMessage());
             }
@@ -167,6 +169,18 @@ public class PostOrdersAndPayments {
 
         paymentProducer.flush();
         paymentProducer.close();
+    }
+
+    private static String orderIdFromLocation(final Response response) {
+        if (response.getLocation() == null) {
+            return null;
+        }
+        final String path = response.getLocation().getPath();
+        final int lastSlash = path.lastIndexOf('/');
+        if (lastSlash < 0 || lastSlash == path.length() - 1) {
+            return null;
+        }
+        return path.substring(lastSlash + 1);
     }
 
 }

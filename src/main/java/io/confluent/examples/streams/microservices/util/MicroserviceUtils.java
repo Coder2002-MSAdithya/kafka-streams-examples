@@ -24,7 +24,6 @@ import org.apache.kafka.streams.difc.DifcPrivilegeRequestHandler;
 import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.common.serialization.Serializer;
-import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.state.RocksDBConfigSetter;
 import org.eclipse.jetty.server.Server;
@@ -45,6 +44,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.Map;
@@ -307,25 +307,17 @@ public class MicroserviceUtils {
     }
   }
 
-  public static void registerDifcClient(final String serviceName,
-                                        final String bootstrapServers,
-                                        final Properties defaultConfig) {
-    final Properties producerConfig = new Properties();
-    producerConfig.putAll(defaultConfig);
-    producerConfig.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-    producerConfig.put(ProducerConfig.CLIENT_ID_CONFIG, serviceName + "-difc-registrar");
-
-    try (KafkaProducer<String, String> registrar = new KafkaProducer<>(
-        producerConfig,
-        new StringSerializer(),
-        new StringSerializer())) {
-      final RegisterClientResponseData response = registrar.registerClient();
-      System.out.printf("[DIFC] registerClient service=%s errorCode=%d message=%s%n",
-          serviceName,
-          response.errorCode(),
-          response.errorMessage());
-      requireDifcOk(response.errorCode(), "registerClient(" + serviceName + ")", response.errorMessage());
-    }
+  /**
+   * Register this service's authenticated DIFC client via the running {@link KafkaStreams} app.
+   * Call only after {@link KafkaStreams#start()} and the app has reached {@code RUNNING}.
+   */
+  public static void registerDifcClient(final String serviceName, final KafkaStreams streams) {
+    final RegisterClientResponseData response = streams.registerClient();
+    System.out.printf("[DIFC] registerClient service=%s errorCode=%d message=%s%n",
+        serviceName,
+        response.errorCode(),
+        response.errorMessage());
+    requireDifcOk(response.errorCode(), "registerClient(" + serviceName + ")", response.errorMessage());
   }
 
   /** Tag name set for {@link org.apache.kafka.streams.kstream.KStream#addTags(Set)} / {@code declassifyTags}. */
@@ -381,24 +373,82 @@ public class MicroserviceUtils {
   }
 
   /**
-   * Request {@code CAN_ADD}/{@code CAN_REMOVE} on a tag owned by another client (no label change).
+   * Request {@code CAN_ADD} on a tag owned by another client.
    */
   public static void requestDifcGrantCapOnly(final String serviceName,
                                              final KafkaStreams streams,
                                              final String tagName) {
     requestDifcGrantCap(serviceName, streams, tagName, Capability.CAN_ADD);
-    requestDifcGrantCap(serviceName, streams, tagName, Capability.CAN_REMOVE);
   }
 
   /**
-   * Request {@code CAN_ADD}/{@code CAN_REMOVE} on a shared tag, then add the tag to this
-   * client's label. FETCH redaction uses label tags ({@code canClientReceive}), not
-   * {@code canAdd} alone — {@link KafkaStreams#addTag} is required to read tagged records.
+   * Request {@code CAN_ADD}, wait until the tag is on this client's label, then return.
+   * Use when the service only consumes tagged input (no {@code declassifyTags} on produce).
+   */
+  public static void requestDifcGrantCapForConsume(final String serviceName,
+                                                   final KafkaStreams streams,
+                                                   final String tagName) {
+    requestDifcGrantCapOnly(serviceName, streams, tagName);
+    waitForLabelTag(serviceName, streams, tagName);
+  }
+
+  /**
+   * Request {@code CAN_ADD} and {@code CAN_REMOVE} on a shared tag, then add the tag to this
+   * client's label. {@code CAN_ADD} enables FETCH; {@code CAN_REMOVE} enables {@code declassifyTags}
+   * on produce (validators strip {@code order}; aggregator strips validation tags + {@code order}).
    */
   public static void requestDifcGrantCapAddAndRemove(final String serviceName,
                                                      final KafkaStreams streams,
                                                      final String tagName) {
-    requestDifcGrantCapOnly(serviceName, streams, tagName);
+    requestDifcGrantCap(serviceName, streams, tagName, Capability.CAN_ADD);
+    waitForAttestedProcessingPolicy(serviceName);
+    try {
+      DifcPolicyPublisher.publishAttestedPolicyForGrant();
+    } catch (final IOException e) {
+      throw new IllegalStateException(
+          "Failed to publish attested processing policy before CAN_REMOVE on tag " + tagName, e);
+    }
+    requestDifcGrantCap(serviceName, streams, tagName, Capability.CAN_REMOVE);
+    waitForLabelTag(serviceName, streams, tagName);
+  }
+
+  /**
+   * Waits until the policy Java agent has exported a signed {@code processing-policy.json}
+   * for this requester (written when {@link KafkaStreams} is constructed).
+   */
+  public static void waitForAttestedProcessingPolicy(final String serviceName) {
+    final String principal = System.getProperty("policy.app.principal");
+    if (principal == null || principal.isEmpty()) {
+      System.out.printf(
+          "[DIFC] policyWaitSkipped service=%s reason=no policy.app.principal (CAN_REMOVE grants require agent)%n",
+          serviceName);
+      return;
+    }
+    final Path policyPath = DifcTagPolicyVerifier.policyPathForRequester(principal);
+    final int maxAttempts = 30;
+    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (Files.isRegularFile(policyPath)) {
+        System.out.printf(
+            "[DIFC] attestedPolicyReady service=%s principal=%s path=%s%n",
+            serviceName,
+            principal,
+            policyPath);
+        return;
+      }
+      try {
+        Thread.sleep(1000L);
+      } catch (final InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new IllegalStateException("Interrupted waiting for attested processing policy", e);
+      }
+    }
+    throw new IllegalStateException(
+        "Attested processing policy not found at " + policyPath + " for service " + serviceName);
+  }
+
+  private static void waitForLabelTag(final String serviceName,
+                                      final KafkaStreams streams,
+                                      final String tagName) {
     // Grants are applied asynchronously by the tag owner; retry until label add succeeds.
     final int maxAttempts = 15;
     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -419,6 +469,10 @@ public class MicroserviceUtils {
     }
   }
 
+  /**
+   * Capability code mapping for {@code POLL_PRIVS_REQ}; kept in sync with
+   * {@code com.springbootkafka.difc.DifcPrivilegeRequests} in spring-boot-kafka.
+   */
   public static Capability capabilityFromPollResponse(final byte capability) {
     return switch (capability) {
       case 0 -> Capability.CAN_ADD;
@@ -428,7 +482,10 @@ public class MicroserviceUtils {
   }
 
   /**
-   * Grant a pending capability request (tag owner approves requester via {@code ADD_CLIENT_PRIVS}).
+   * Grant a pending capability request (tag owner approves requester via {@code ADD_CLIENT_PRIVS})
+   * when {@link DifcGrantPolicy} allows the requester/tag/capability triple.
+   * Downstream services enqueue work via {@link KafkaStreams#requestGrantCap}; the tag owner polls
+   * {@code POLL_PRIVS_REQ} and calls this method (see {@link #autoGrantPrivilegeRequests}).
    */
   public static void grantPendingPrivilegeRequest(final String serviceName,
                                                   final KafkaStreams streams,
@@ -442,6 +499,49 @@ public class MicroserviceUtils {
       return;
     }
     final Capability capability = capabilityFromPollResponse(pending.capability());
+    if (!DifcGrantPolicy.isPrincipalAllowedGrant(tagName, requester, capability)) {
+      System.out.printf(
+          "[DIFC] grantDenied service=%s requester=%s tag=%s capability=%s reason=principal not allowed%n",
+          serviceName,
+          requester,
+          tagName,
+          capability);
+      return;
+    }
+    if (capability == Capability.CAN_REMOVE) {
+      try {
+        final String grantorPrincipal = GrantorTagTopology.principalForServiceName(serviceName);
+        final DifcTagPolicyVerifier.VerificationResult policyResult =
+            DifcTagPolicyVerifier.verifyAttestationAndCanRemoveOnTag(
+                requester, grantorPrincipal, tagName);
+        if (!policyResult.allowed()) {
+          System.out.printf(
+              "[DIFC] grantDeniedPolicy service=%s requester=%s tag=%s capability=%s reason=%s%n",
+              serviceName,
+              requester,
+              tagName,
+              capability,
+              policyResult.reason());
+          return;
+        }
+        System.out.printf(
+            "[DIFC] grantPolicyVerified service=%s requester=%s tag=%s capability=%s reason=%s%n",
+            serviceName,
+            requester,
+            tagName,
+            capability,
+            policyResult.reason());
+      } catch (final IOException e) {
+        System.out.printf(
+            "[DIFC] grantDeniedPolicy service=%s requester=%s tag=%s capability=%s reason=%s%n",
+            serviceName,
+            requester,
+            tagName,
+            capability,
+            e.getMessage());
+        return;
+      }
+    }
     final AddClientPrivsResponseData response =
         streams.addClientPrivs(requester, tagName, capability);
     System.out.printf(
@@ -460,7 +560,7 @@ public class MicroserviceUtils {
   }
 
   /**
-   * {@link KafkaStreams} that auto-approves incoming {@code GRANT_CAP} requests (tag owners only).
+   * {@link KafkaStreams} that approves incoming {@code GRANT_CAP} requests per {@link DifcGrantPolicy}.
    */
   public static KafkaStreams kafkaStreamsWithAutoGrant(final Topology topology,
                                                        final Properties props,
@@ -473,30 +573,23 @@ public class MicroserviceUtils {
     return holder[0];
   }
 
+  /**
+   * Create a DIFC tag owned by this service via the running {@link KafkaStreams} app.
+   * Call only after {@link KafkaStreams#start()} and the app has reached {@code RUNNING}.
+   */
   public static void createDifcTag(final String serviceName,
-                                   final String tagName,
-                                   final String bootstrapServers,
-                                   final Properties defaultConfig) {
-    final Properties producerConfig = new Properties();
-    producerConfig.putAll(defaultConfig);
-    producerConfig.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-    producerConfig.put(ProducerConfig.CLIENT_ID_CONFIG, serviceName + "-difc-tag-creator");
-
-    try (KafkaProducer<String, String> registrar = new KafkaProducer<>(
-        producerConfig,
-        new StringSerializer(),
-        new StringSerializer())) {
-      final CreateTagResponseData response = registrar.createTag(tagName);
-      System.out.printf("[DIFC] createTag service=%s tag=%s errorCode=%d message=%s%n",
-          serviceName,
-          tagName,
-          response.errorCode(),
-          response.errorMessage());
-      requireDifcOk(
-          response.errorCode(),
-          "createTag(" + serviceName + ", " + tagName + ")",
-          response.errorMessage());
-    }
+                                   final KafkaStreams streams,
+                                   final String tagName) {
+    final CreateTagResponseData response = streams.createTag(tagName);
+    System.out.printf("[DIFC] createTag service=%s tag=%s errorCode=%d message=%s%n",
+        serviceName,
+        tagName,
+        response.errorCode(),
+        response.errorMessage());
+    requireDifcOk(
+        response.errorCode(),
+        "createTag(" + serviceName + ", " + tagName + ")",
+        response.errorMessage());
   }
 
   public static void addShutdownHookAndBlock(final Service service) throws InterruptedException {

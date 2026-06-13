@@ -2,6 +2,7 @@ package io.confluent.examples.streams.microservices;
 
 import java.io.IOException;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -63,12 +64,13 @@ import io.confluent.examples.streams.avro.microservices.Order;
 import io.confluent.examples.streams.avro.microservices.OrderState;
 import io.confluent.examples.streams.interactivequeries.HostStoreInfo;
 import io.confluent.examples.streams.interactivequeries.MetadataService;
+import io.confluent.examples.streams.microservices.domain.ProductCatalog;
 import io.confluent.examples.streams.microservices.domain.Schemas;
+import io.confluent.examples.streams.microservices.domain.beans.CreateOrderRequestBean;
 import io.confluent.examples.streams.microservices.domain.beans.OrderBean;
 import io.confluent.examples.streams.microservices.util.Paths;
 
 import static io.confluent.examples.streams.microservices.domain.Schemas.Topics.ORDERS;
-import static io.confluent.examples.streams.microservices.domain.beans.OrderBean.fromBean;
 import static io.confluent.examples.streams.microservices.domain.beans.OrderBean.toBean;
 import static io.confluent.examples.streams.microservices.util.MicroserviceUtils.*;
 
@@ -325,18 +327,38 @@ public class OrdersService implements Service {
   @ManagedAsync
   @Path("/orders")
   @Consumes(MediaType.APPLICATION_JSON)
-  public void submitOrder(final OrderBean order,
+  public void submitOrder(final CreateOrderRequestBean request,
       @QueryParam("timeout") @DefaultValue(CALL_TIMEOUT) final Long timeout,
       @Suspended final AsyncResponse response) {
     setTimeout(timeout, response);
 
-    final Order bean = fromBean(order);
-    System.out.printf("[OrdersService] Received HTTP order id=%s state=%s product=%s quantity=%s%n",
-        bean.getId(), bean.getState(), bean.getProduct(), bean.getQuantity());
+    if (request == null || request.getProduct() == null) {
+      response.resume(Response.status(Response.Status.BAD_REQUEST)
+          .entity("customerId, product, and quantity are required").build());
+      return;
+    }
+    if (request.getQuantity() <= 0) {
+      response.resume(Response.status(Response.Status.BAD_REQUEST)
+          .entity("quantity must be positive").build());
+      return;
+    }
+
+    final String orderId = UUID.randomUUID().toString();
+    final double unitPrice = ProductCatalog.unitPrice(request.getProduct());
+    final Order order = new Order(
+        orderId,
+        request.getCustomerId(),
+        OrderState.CREATED,
+        request.getProduct(),
+        request.getQuantity(),
+        unitPrice);
+    System.out.printf(
+        "[OrdersService] Received HTTP order customer=%s product=%s quantity=%s -> id=%s price=%.2f%n",
+        order.getCustomerId(), order.getProduct(), order.getQuantity(), orderId, unitPrice);
     producer.sendWithTags(
-        new ProducerRecord<>(ORDERS.name(), bean.getId(), bean),
+        new ProducerRecord<>(ORDERS.name(), orderId, order),
         DIFC_ORDER_TAGS,
-        callback(response, bean.getId()));
+        callback(response, orderId));
   }
 
   @SuppressWarnings("unchecked")
@@ -344,8 +366,6 @@ public class OrdersService implements Service {
   public void start(final String bootstrapServers,
                     final String stateDir,
                     final Properties defaultConfig) {
-    registerDifcClient(SERVICE_APP_ID, bootstrapServers, defaultConfig);
-    createDifcTag(SERVICE_APP_ID, DIFC_ORDER_TAG, bootstrapServers, defaultConfig);
     jettyServer = startJetty(port, this);
     port = jettyServer.getURI().getPort(); // update port, in case port was zero
     producer = startProducer(bootstrapServers, ORDERS, defaultConfig);
@@ -381,6 +401,8 @@ public class OrdersService implements Service {
     } catch (final InterruptedException e) {
       Thread.currentThread().interrupt();
     }
+    registerDifcClient(SERVICE_APP_ID, streams);
+    createDifcTag(SERVICE_APP_ID, streams, DIFC_ORDER_TAG);
     return streams;
   }
 
