@@ -48,6 +48,28 @@ class ProcessingPolicyGraphHelperTest {
   }
 
   @Test
+  void ingressLinksSameTopicRepublicationForValidationsAggregatorShape() throws Exception {
+    final AppProcessingPolicy policy = MAPPER.readValue("""
+        {
+          "version": 2,
+          "sources": ["order-validations", "orders"],
+          "egressPaths": [{
+            "topic": "orders",
+            "ingressTopics": [],
+            "operators": ["join", "merge", "aggregate", "filter"]
+          }],
+          "graph": {"nodes": [], "edges": []}
+        }
+        """, AppProcessingPolicy.class);
+
+    ProcessingPolicyGraphHelper.enrichEgressPathsFromSources(policy);
+    assertTrue(policy.getEgressPaths().get(0).getIngressTopics().contains("orders"));
+    assertFalse(
+        ProcessingPolicyGraphHelper.egressPathsProcessingTopics(policy, java.util.Set.of("orders"))
+            .isEmpty());
+  }
+
+  @Test
   void enrichesIngressFromDeclaredSources() throws Exception {
     final AppProcessingPolicy policy = MAPPER.readValue("""
         {

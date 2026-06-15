@@ -133,9 +133,13 @@ public final class RelationalAlgebraTreeVerifier {
     }
     if (Set.of("mapvalues", "map", "flatmapvalues", "flatmap", "transform", "transformvalues", "process")
         .contains(op)) {
-      if ("order-validations".equals(sinkTopic)) {
-        return TopicSchemaCatalog.copyFields(TopicSchemaCatalog.valueFieldsForTopic("order-validations"));
+      if (!node.getOutputFields().isEmpty()) {
+        return new LinkedHashSet<>(node.getOutputFields());
       }
+      if (node.getChildren().isEmpty()) {
+        return Set.of();
+      }
+      return evaluateOutputFields(node.getChildren().get(0), sinkTopic);
     }
     if (Set.of("aggregate", "reduce", "count").contains(op)) {
       return Set.of("_aggregate_value");

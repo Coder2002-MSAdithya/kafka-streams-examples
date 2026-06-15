@@ -152,11 +152,24 @@ public final class ProcessingPolicyGraphHelper {
     }
     final String egressTopic = path.getTopic();
     for (final String source : policy.getSources()) {
-      if (!source.equals(egressTopic)) {
+      if (!source.equals(egressTopic) || documentsSameTopicRepublication(policy, path)) {
         ingress.add(source);
       }
     }
     return ingress;
+  }
+
+  private static boolean documentsSameTopicRepublication(
+      final AppProcessingPolicy policy,
+      final AppProcessingPolicy.EgressPath path) {
+    if (path == null || path.getTopic() == null || path.getTopic().isEmpty()) {
+      return false;
+    }
+    if (egressPathHasRelationalSanitization(path, policy)) {
+      return true;
+    }
+    return policy.getGraph() != null
+        && directedPathHasProcessingOperator(policy.getGraph(), path.getTopic(), path.getTopic());
   }
 
   public static void enrichEgressPathsFromSources(final AppProcessingPolicy policy) {
