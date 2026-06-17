@@ -508,7 +508,37 @@ public class MicroserviceUtils {
           capability);
       return;
     }
-    if (capability == Capability.CAN_REMOVE) {
+    if (capability == Capability.CAN_ADD) {
+      try {
+        final DifcTagPolicyVerifier.VerificationResult externalResult =
+            DifcExternalConnectionVerifier.verifyCanAdd(requester);
+        if (!externalResult.allowed()) {
+          System.out.printf(
+              "[DIFC] grantDeniedExternal service=%s requester=%s tag=%s capability=%s reason=%s%n",
+              serviceName,
+              requester,
+              tagName,
+              capability,
+              externalResult.reason());
+          return;
+        }
+        System.out.printf(
+            "[DIFC] grantExternalVerified service=%s requester=%s tag=%s capability=%s reason=%s%n",
+            serviceName,
+            requester,
+            tagName,
+            capability,
+            externalResult.reason());
+      } catch (final IOException e) {
+        System.out.printf(
+            "[DIFC] grantExternalCheckSkipped service=%s requester=%s tag=%s capability=%s reason=%s%n",
+            serviceName,
+            requester,
+            tagName,
+            capability,
+            e.getMessage());
+      }
+    } else if (capability == Capability.CAN_REMOVE) {
       try {
         final String grantorPrincipal = GrantorTagTopology.principalForServiceName(serviceName);
         final DifcTagPolicyVerifier.VerificationResult policyResult =

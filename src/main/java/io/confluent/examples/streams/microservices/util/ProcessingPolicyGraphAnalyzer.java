@@ -4,16 +4,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
-/**
- * Grantor-side {@code CAN_REMOVE} verification for owned tag {@code X}:
- * <ol>
- *   <li>Topics where grantor publishes tag {@code X}</li>
- *   <li>Vacuous allow if requester consumes none of them</li>
- *   <li>Otherwise every output-topic relation {@code input → egress} that involves a consumed
- *       grantor topic must have a relational-algebra plan (extracted from the processing graph)
- *       that sanitizes grantor-defined sensitive fields on that tagged input</li>
- * </ol>
- */
+/** Grantor-side {@code CAN_REMOVE} verification using tag-carrier topics. */
 public final class ProcessingPolicyGraphAnalyzer {
 
   private ProcessingPolicyGraphAnalyzer() {
@@ -31,14 +22,14 @@ public final class ProcessingPolicyGraphAnalyzer {
           "grantor " + grantorPrincipal + " does not own tag " + ownedTag);
     }
 
-    final Set<String> grantorPublishTopics =
-        new LinkedHashSet<>(GrantorTagTopology.grantorPublishTopicsForTag(grantorPrincipal, ownedTag));
+    final Set<String> tagCarrierTopics =
+        new LinkedHashSet<>(GrantorTagTopology.tagCarrierTopics(ownedTag));
 
-    final Set<String> consumedGrantorTopics =
-        ProcessingPolicyGraphHelper.consumedTopics(rawPolicy, grantorPublishTopics);
-    if (consumedGrantorTopics.isEmpty()) {
+    final Set<String> consumedTaggedTopics =
+        ProcessingPolicyGraphHelper.consumedTopics(rawPolicy, tagCarrierTopics);
+    if (consumedTaggedTopics.isEmpty()) {
       return DifcTagPolicyVerifier.VerificationResult.allow(
-          "vacuous: requester does not consume grantor topics publishing tag " + ownedTag);
+          "vacuous: requester does not consume topics carrying tag " + ownedTag);
     }
 
     if (rawPolicy.getRelationalAlgebraAnalysis() == null
@@ -48,16 +39,17 @@ public final class ProcessingPolicyGraphAnalyzer {
     }
 
     final List<AppProcessingPolicy.EgressPath> processingPaths =
-        ProcessingPolicyGraphHelper.egressPathsProcessingTopics(rawPolicy, consumedGrantorTopics);
+        ProcessingPolicyGraphHelper.egressPathsProcessingTopics(rawPolicy, consumedTaggedTopics);
     if (processingPaths.isEmpty()) {
       return DifcTagPolicyVerifier.VerificationResult.deny(
           "requester consumes "
-              + consumedGrantorTopics
-              + " but no egress path processes grantor-tagged data for tag "
-              + ownedTag);
+              + consumedTaggedTopics
+              + " carrying tag "
+              + ownedTag
+              + " but no egress path processes that input");
     }
 
-    for (final String consumed : consumedGrantorTopics) {
+    for (final String consumed : consumedTaggedTopics) {
       for (final AppProcessingPolicy.EgressPath egress : processingPaths) {
         if (!ProcessingPolicyGraphHelper.ingressTopicsForEgressPath(rawPolicy, egress)
             .contains(consumed)) {
@@ -67,6 +59,16 @@ public final class ProcessingPolicyGraphAnalyzer {
             ownedTag, consumed, egress.getTopic(), rawPolicy)) {
           final AppProcessingPolicy.ProcessingPathAnalysis failedPath =
               GrantRelationalAlgebraVerifier.pathAnalysisFor(rawPolicy, consumed, egress.getTopic());
+          if (failedPath == null) {
+            return DifcTagPolicyVerifier.VerificationResult.deny(
+                "no relational-algebra plan for "
+                    + consumed
+                    + " → "
+                    + egress.getTopic()
+                    + " (tag "
+                    + ownedTag
+                    + ")");
+          }
           return DifcTagPolicyVerifier.VerificationResult.deny(
               GrantRelationalAlgebraVerifier.denialReason(
                   ownedTag, consumed, egress.getTopic(), failedPath));
@@ -74,6 +76,25 @@ public final class ProcessingPolicyGraphAnalyzer {
       }
     }
 
-    return DifcTagPolicyVerifier.VerificationResult.allow("policy verified");
+    final Set<String> grantorPublishTopics =
+        new LinkedHashSet<>(GrantorTagTopology.grantorPublishTopicsForTag(grantorPrincipal, ownedTag));
+    final Set<String> consumedFromGrantorPublish = new LinkedHashSet<>(consumedTaggedTopics);
+    consumedFromGrantorPublish.retainAll(grantorPublishTopics);
+    if (consumedFromGrantorPublish.isEmpty()) {
+      return DifcTagPolicyVerifier.VerificationResult.allow(
+          "policy verified: requester consumes "
+              + consumedTaggedTopics
+              + " carrying tag "
+              + ownedTag
+              + " (republication; grantor publishes tag only on "
+              + grantorPublishTopics
+              + "); RA sanitizes sensitive fields");
+    }
+    return DifcTagPolicyVerifier.VerificationResult.allow(
+        "policy verified: requester consumes grantor publish topic(s) "
+            + consumedFromGrantorPublish
+            + " carrying tag "
+            + ownedTag
+            + "; RA sanitizes sensitive fields");
   }
 }

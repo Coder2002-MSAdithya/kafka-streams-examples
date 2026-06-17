@@ -19,6 +19,9 @@ ADMIN_CONFIG="${SCRIPT_DIR}/admin-client.properties"
 
 # Two-broker cluster bootstrap (SASL listeners)
 export BOOTSTRAP_SERVERS="${BOOTSTRAP_SERVERS:-localhost:9092,localhost:9094}"
+export POLICY_AGENT_ALLOWED_EXTERNAL_HOSTS="${POLICY_AGENT_ALLOWED_EXTERNAL_HOSTS:-}"
+export STATE_DIR="${STATE_DIR:-/tmp/kafka-streams-examples}"
+export DIFC_ENABLED="${DIFC_ENABLED:-true}"
 
 export KAFKA_OPTS="-Djava.security.auth.login.config=${JAAS_CONFIG}"
 

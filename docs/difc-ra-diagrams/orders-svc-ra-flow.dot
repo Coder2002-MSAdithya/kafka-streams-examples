@@ -1,0 +1,17 @@
+digraph ra {
+  graph [rankdir=TB, bgcolor="white", fontname="Helvetica", splines=ortho, nodesep=0.35, ranksep=0.5, ordering="out"];
+  node [fontname="Helvetica", fontsize=11, style=filled, height=0.3, margin="0.08,0.04"];
+  edge [fontname="Helvetica", color="#444444", arrowsize=0.65];
+  label="OrdersService (orders-svc)\nRelational algebra (tree)";
+  labelloc=t;
+  fontsize=14;
+  subgraph cluster_0 {
+    label="? → orders"; style=rounded; color="#adb5bd"; fontsize=10;
+    r0t0 [label="Sink(orders)", shape=ellipse, style="filled", fillcolor="#d4edda"];
+    r0anchor [style=invis, width=0, height=0, label=""];
+    r0t0 -> r0anchor [style=invis];
+    r0anchor -> r0note [style=invis];
+    r0note [label="field summary unavailable", shape=note, fillcolor="#f8f9fa", fontsize=10];
+    { rank=max; r0note; }
+  }
+}

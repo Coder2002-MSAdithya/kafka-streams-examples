@@ -1,0 +1,17 @@
+digraph KafkaDsl {
+  rankdir=LR;
+
+  subgraph cluster_legend {
+    label="Legend";
+    keyTopic [label="Kafka Topic", shape="cylinder", style="filled", fillcolor="#D6EAF8"];
+    keyStream [label="Kafka Stream", shape="ellipse", style="filled", fillcolor="#FCF3CF"];
+    keyOperator [label="DSL Operator", shape="box", style="filled", fillcolor="#E8F0FE"];
+    keyBranch [label="Branch Operator", shape="diamond", style="filled", fillcolor="#E8F0FE"];
+    keyJoin [label="Join/Merge Operator", shape="hexagon", style="filled", fillcolor="#E8F0FE"];
+    keyStore [label="State Store", shape="folder", style="filled", fillcolor="#F9E79F"];
+  }
+
+
+
+  graph [label="Generated at 2026-06-16T20:07:16.522917122Z"];
+}

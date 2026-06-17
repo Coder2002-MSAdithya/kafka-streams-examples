@@ -31,7 +31,13 @@ public final class RelationalAlgebraTreeVerifier {
       return true;
     }
 
-    final Set<String> finalFields = evaluateOutputFields(path.getExpressionTree(), sinkTopic);
+    final Set<String> finalFields =
+        resolveEgressOutputFields(path.getExpressionTree(), sinkTopic, path);
+    if (!egressDocumentsSanitization(path, sinkTopic)
+        && !scanTopic.equals(sinkTopic)
+        && finalFields.equals(scanFields)) {
+      return false;
+    }
     final Set<String> retainedSensitive = new LinkedHashSet<>(finalFields);
     retainedSensitive.retainAll(taggedSensitive);
     return retainedSensitive.isEmpty();
@@ -45,7 +51,8 @@ public final class RelationalAlgebraTreeVerifier {
     if (path == null || path.getExpressionTree() == null) {
       return Set.of();
     }
-    final Set<String> finalFields = evaluateOutputFields(path.getExpressionTree(), sinkTopic);
+    final Set<String> finalFields =
+        resolveEgressOutputFields(path.getExpressionTree(), sinkTopic, path);
     final Set<String> retained = new LinkedHashSet<>(finalFields);
     retained.retainAll(sensitive);
     return retained;
@@ -90,15 +97,70 @@ public final class RelationalAlgebraTreeVerifier {
     if (node == null) {
       return Set.of();
     }
+    if ("sink".equals(node.getKind())) {
+      return evaluateChildOutput(node, sinkTopic);
+    }
+    if ("operator".equals(node.getKind()) && shouldRecomputeOperatorFields(node)) {
+      return evaluateOperatorOutput(node, sinkTopic);
+    }
     if (!node.getOutputFields().isEmpty()) {
       return new LinkedHashSet<>(node.getOutputFields());
     }
     return switch (node.getKind()) {
       case "scan" -> TopicSchemaCatalog.copyFields(TopicSchemaCatalog.valueFieldsForTopic(node.getTopic()));
-      case "sink" -> evaluateChildOutput(node, sinkTopic);
       case "operator" -> evaluateOperatorOutput(node, sinkTopic);
       default -> Set.of();
     };
+  }
+
+  private static boolean shouldRecomputeOperatorFields(
+      final AppProcessingPolicy.RelationalAlgebraExpressionNode node) {
+    final String op = node.getTopic() == null ? "" : node.getTopic();
+    return Set.of("join", "leftjoin", "outerjoin", "merge", "aggregate", "reduce", "count")
+        .contains(op);
+  }
+
+  static Set<String> resolveEgressOutputFields(
+      final AppProcessingPolicy.RelationalAlgebraExpressionNode root,
+      final String sinkTopic,
+      final AppProcessingPolicy.ProcessingPathAnalysis path) {
+    final Set<String> pipelineFields = evaluateOutputFields(root, sinkTopic);
+    if (!egressDocumentsSanitization(path, sinkTopic)) {
+      return pipelineFields;
+    }
+    if (schemaNarrowingEgress(sinkTopic, pipelineFields)) {
+      return TopicSchemaCatalog.copyFields(TopicSchemaCatalog.valueFieldsForTopic(sinkTopic));
+    }
+    return pipelineFields;
+  }
+
+  private static boolean egressDocumentsSanitization(
+      final AppProcessingPolicy.ProcessingPathAnalysis path,
+      final String sinkTopic) {
+    if (path == null) {
+      return false;
+    }
+    if (!path.getSteps().isEmpty()) {
+      for (final AppProcessingPolicy.RelationalAlgebraStep step : path.getSteps()) {
+        if (step.getOutputFields() != null && !step.getOutputFields().isEmpty()) {
+          return true;
+        }
+      }
+    }
+    return path.getAlgebraExpression() != null
+        && containsSanitizingOperator(path.getAlgebraExpression());
+  }
+
+  private static boolean containsSanitizingOperator(final String algebraExpression) {
+    final String expr = algebraExpression.toLowerCase(java.util.Locale.ROOT);
+    return expr.contains("mapvalues")
+        || expr.contains("map(")
+        || expr.contains("process")
+        || expr.contains("filter")
+        || expr.contains("aggregate")
+        || expr.contains("reduce")
+        || expr.contains("σ[")
+        || expr.contains("σ(");
   }
 
   private static Set<String> evaluateChildOutput(
@@ -108,6 +170,24 @@ public final class RelationalAlgebraTreeVerifier {
       return TopicSchemaCatalog.copyFields(TopicSchemaCatalog.valueFieldsForTopic(sinkTopic));
     }
     return evaluateOutputFields(node.getChildren().get(0), sinkTopic);
+  }
+
+  /** True when a known sink schema drops order-sensitive fields present in the pipeline output. */
+  private static boolean schemaNarrowingEgress(
+      final String sinkTopic,
+      final Set<String> pipelineFields) {
+    if (!TopicSchemaCatalog.isKnownTopic(sinkTopic) || pipelineFields.isEmpty()) {
+      return false;
+    }
+    final Set<String> sinkSchema = TopicSchemaCatalog.valueFieldsForTopic(sinkTopic);
+    if (sinkSchema.isEmpty() || sinkSchema.equals(pipelineFields)) {
+      return false;
+    }
+    final Set<String> retainedOrderSensitive = new LinkedHashSet<>(pipelineFields);
+    retainedOrderSensitive.retainAll(TopicSchemaCatalog.sensitiveOrderFields());
+    final Set<String> sinkOrderSensitive = new LinkedHashSet<>(sinkSchema);
+    sinkOrderSensitive.retainAll(TopicSchemaCatalog.sensitiveOrderFields());
+    return !retainedOrderSensitive.isEmpty() && sinkOrderSensitive.isEmpty();
   }
 
   private static Set<String> evaluateOperatorOutput(
@@ -142,7 +222,16 @@ public final class RelationalAlgebraTreeVerifier {
       return evaluateOutputFields(node.getChildren().get(0), sinkTopic);
     }
     if (Set.of("aggregate", "reduce", "count").contains(op)) {
-      return Set.of("_aggregate_value");
+      if ("orders".equals(sinkTopic)) {
+        return TopicSchemaCatalog.copyFields(TopicSchemaCatalog.valueFieldsForTopic("orders"));
+      }
+      if (!node.getOutputFields().isEmpty()) {
+        return new LinkedHashSet<>(node.getOutputFields());
+      }
+      if (node.getChildren().isEmpty()) {
+        return Set.of("_aggregate_value");
+      }
+      return evaluateOutputFields(node.getChildren().get(0), sinkTopic);
     }
     if (node.getChildren().isEmpty()) {
       return Set.of();

@@ -8,6 +8,37 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class GrantRelationalAlgebraVerifierTest {
 
   @Test
+  void incompleteGraphRepublicationStillDeniesOrderTag() throws Exception {
+    final AppProcessingPolicy policy = AgentPolicyTestSupport.agentEnriched("""
+        {
+          "version": 2,
+          "sources": ["orders", "order-validations"],
+          "egressPaths": [
+            {
+              "topic": "orders",
+              "ingressTopics": ["orders", "order-validations"],
+              "operators": ["join", "aggregate", "merge"]
+            }
+          ],
+          "graph": {
+            "nodes": [
+              {"id":"topic_orders","kind":"topic","topic":"orders"},
+              {"id":"topic_order_validations","kind":"topic","topic":"order-validations"},
+              {"id":"op_join","kind":"operator","label":"join()"}
+            ],
+            "edges": [
+              {"from":"topic_order_validations","to":"op_join","label":"right"},
+              {"from":"op_join","to":"topic_orders","label":"writes"}
+            ]
+          }
+        }
+        """);
+    assertFalse(
+        GrantRelationalAlgebraVerifier.relationSanitizesTaggedInput(
+            DifcGrantPolicy.TAG_ORDER, "orders", "orders", policy));
+  }
+
+  @Test
   void treeJoinDeniesWhenScanOrdersRetainsSensitiveFields() throws Exception {
     final AppProcessingPolicy policy = AgentPolicyTestSupport.agentEnriched("""
         {

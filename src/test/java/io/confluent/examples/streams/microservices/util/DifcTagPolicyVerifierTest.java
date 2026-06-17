@@ -118,6 +118,49 @@ class DifcTagPolicyVerifierTest {
   }
 
   @Test
+  void collapsedExpressionWithAgentPathMetricsStillGrants() throws Exception {
+    final AppProcessingPolicy policy = readPolicy("""
+        {
+          "version": 2,
+          "sources": ["orders"],
+          "relationalAlgebraAnalysis": {
+            "processingPaths": [{
+              "ingressTopic": "orders",
+              "egressTopic": "order-validations",
+              "algebraExpression": "Sink(order-validations, π(∪(Scan(orders))))",
+              "inputFields": ["customerId", "state", "product", "price", "quantity", "id"],
+              "outputFields": ["orderId", "checkType", "validationResult"],
+              "droppedSensitiveFields": ["customerId", "state", "product", "price", "quantity"],
+              "schemaChanged": true,
+              "sensitiveFieldSanitizationRatio": 0.83,
+              "expressionTree": {
+                "kind": "sink",
+                "topic": "order-validations",
+                "children": [{
+                  "kind": "operator",
+                  "topic": "merge",
+                  "children": [{"kind": "scan", "topic": "orders"}]
+                }]
+              }
+            }]
+          },
+          "egressPaths": [{
+            "topic": "order-validations",
+            "ingressTopics": ["orders"],
+            "operators": ["mapValues", "merge"],
+            "declassifyTags": ["order"]
+          }]
+        }
+        """);
+    final DifcTagPolicyVerifier.VerificationResult result =
+        DifcTagPolicyVerifier.verifyCanRemoveOnTag(
+            DifcGrantPolicy.TAG_ORDER,
+            DifcGrantPolicy.PRINCIPAL_ORDERS,
+            policy);
+    assertTrue(result.allowed(), result.reason());
+  }
+
+  @Test
   void fraudManifestGraphDocumentsOrdersToValidationsPath() throws Exception {
     final AppProcessingPolicy policy = readPolicy("""
         {
@@ -187,11 +230,12 @@ class DifcTagPolicyVerifierTest {
             DifcGrantPolicy.TAG_FRAUD,
             DifcGrantPolicy.PRINCIPAL_FRAUD,
             policy).allowed());
-    assertFalse(
+    final DifcTagPolicyVerifier.VerificationResult repubOrderResult =
         DifcTagPolicyVerifier.verifyCanRemoveOnTag(
             DifcGrantPolicy.TAG_ORDER,
             DifcGrantPolicy.PRINCIPAL_ORDERS,
-            policy).allowed());
+            policy);
+    assertFalse(repubOrderResult.allowed(), repubOrderResult.reason());
   }
 
   @Test
@@ -328,11 +372,12 @@ class DifcTagPolicyVerifierTest {
           }
         }
         """);
-    assertFalse(
+    final DifcTagPolicyVerifier.VerificationResult passthroughResult =
         DifcTagPolicyVerifier.verifyCanRemoveOnTag(
             DifcGrantPolicy.TAG_ORDER,
             DifcGrantPolicy.PRINCIPAL_ORDERS,
-            policy).allowed());
+            policy);
+    assertFalse(passthroughResult.allowed(), passthroughResult.reason());
     assertFalse(
         DifcTagPolicyVerifier.isAllowedGrantWithPolicy(
             DifcGrantPolicy.TAG_ORDER,

@@ -28,6 +28,7 @@ grantor_policy_trust_java_opts() {
   cat <<EOF
 -Dpolicy.grantor.trusted.ca.path=${trusted_ca}
 -Dpolicy.registry.dir=${state_dir}/policy
+-Dpolicy.agent.kafka.bootstrap=${BOOTSTRAP_SERVERS:-localhost:9092,localhost:9094}
 EOF
 }
 
@@ -63,6 +64,8 @@ policy_agent_java_opts() {
   cat <<EOF
 -javaagent:${jar}
 -Dpolicy.agent.network.enforcement=false
+-Dpolicy.agent.allowed.external.hosts=${POLICY_AGENT_ALLOWED_EXTERNAL_HOSTS:-}
+-Dpolicy.agent.kafka.bootstrap=${BOOTSTRAP_SERVERS}
 -Dpolicy.agent.trusted.ca.path=${trusted_ca}
 -Dpolicy.grantor.trusted.ca.path=${trusted_ca}
 -Dpolicy.agent.signing.key.path=${signing_dir}/policy-signing-key.pem

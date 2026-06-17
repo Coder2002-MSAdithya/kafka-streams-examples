@@ -26,14 +26,18 @@ public final class GrantRelationalAlgebraVerifier {
     if (path == null) {
       return false;
     }
-    if (path.getExpressionTree() != null) {
-      return RelationalAlgebraTreeVerifier.scanSanitizesTaggedInput(
-          path, ownedTag, inputTopic, outputTopic);
-    }
-    if (path.getSteps().isEmpty()) {
+    if (path.getExpressionTree() == null) {
       return false;
     }
-    return sensitiveFieldsSanitized(ownedTag, inputTopic, path);
+    if (agentPathAnalysisSanitizes(path, ownedTag, inputTopic, policy, outputTopic)) {
+      return true;
+    }
+    if (RelationalAlgebraTreeVerifier.scanSanitizesTaggedInput(
+        path, ownedTag, inputTopic, outputTopic)) {
+      return true;
+    }
+    return PipelineProjectionRegistry.satisfiesDeclassifyViaProjection(
+        policy, path, ownedTag, inputTopic, outputTopic);
   }
 
   public static String denialReason(
@@ -53,7 +57,7 @@ public final class GrantRelationalAlgebraVerifier {
     final Set<String> sensitive = GrantorTagTopology.sensitiveFieldsForTaggedInput(ownedTag, inputTopic);
     final Set<String> retainedSensitive =
         path.getExpressionTree() != null
-            ? RelationalAlgebraTreeVerifier.retainedSensitiveFields(path, inputTopic, outputTopic, sensitive)
+            ? retainedSensitiveForPath(path, inputTopic, outputTopic, sensitive)
             : retainedSensitiveFields(path, sensitive);
     return "output relation "
         + inputTopic
@@ -108,9 +112,11 @@ public final class GrantRelationalAlgebraVerifier {
       if (!egressTopic.equals(path.getEgressTopic())) {
         continue;
       }
-      if (path.getExpressionTree() != null
-          && RelationalAlgebraTreeVerifier.findScan(path.getExpressionTree(), ingressTopic) != null) {
-        return path;
+      if (path.getExpressionTree() != null) {
+        if (RelationalAlgebraTreeVerifier.findScan(path.getExpressionTree(), ingressTopic) != null) {
+          return path;
+        }
+        continue;
       }
       if (ingressTopic.equals(path.getIngressTopic())) {
         return path;
@@ -120,5 +126,113 @@ public final class GrantRelationalAlgebraVerifier {
       }
     }
     return null;
+  }
+
+  /**
+   * Prefer agent-computed {@code outputFields} / {@code droppedSensitiveFields} only when the
+   * signed policy documents real sanitization (operators, declassify, or callbacks) — not sink-schema
+   * narrowing alone on a passthrough graph edge.
+   */
+  static boolean agentPathAnalysisSanitizes(
+      final AppProcessingPolicy.ProcessingPathAnalysis path,
+      final String ownedTag,
+      final String scanTopic,
+      final AppProcessingPolicy policy,
+      final String egressTopic) {
+    if (path == null || path.getOutputFields() == null || path.getOutputFields().isEmpty()) {
+      return false;
+    }
+    if (scanTopic.equals(egressTopic)) {
+      return false;
+    }
+    if (!agentPathHasSanitizationEvidence(policy, path, egressTopic, ownedTag)) {
+      return false;
+    }
+    final Set<String> sensitive = GrantorTagTopology.sensitiveFieldsForTaggedInput(ownedTag, scanTopic);
+    if (sensitive.isEmpty()) {
+      return true;
+    }
+    final Set<String> taggedOnScan =
+        new LinkedHashSet<>(TopicSchemaCatalog.valueFieldsForTopic(scanTopic));
+    taggedOnScan.retainAll(sensitive);
+    if (taggedOnScan.isEmpty()) {
+      return true;
+    }
+    final Set<String> output = new LinkedHashSet<>(path.getOutputFields());
+    final Set<String> retained = new LinkedHashSet<>(output);
+    retained.retainAll(taggedOnScan);
+    if (!retained.isEmpty()) {
+      return false;
+    }
+    if (path.getDroppedSensitiveFields().isEmpty()) {
+      return false;
+    }
+    final Set<String> droppedTagged = new LinkedHashSet<>(path.getDroppedSensitiveFields());
+    droppedTagged.retainAll(taggedOnScan);
+    return droppedTagged.containsAll(taggedOnScan);
+  }
+
+  static boolean agentPathHasSanitizationEvidence(
+      final AppProcessingPolicy policy,
+      final AppProcessingPolicy.ProcessingPathAnalysis path,
+      final String egressTopic,
+      final String ownedTag) {
+    if (policy != null && policy.getEgressPaths() != null) {
+      for (final AppProcessingPolicy.EgressPath egress : policy.getEgressPaths()) {
+        if (!egressTopic.equals(egress.getTopic())) {
+          continue;
+        }
+        if (egress.getDeclassifyTags() != null && egress.getDeclassifyTags().contains(ownedTag)) {
+          return true;
+        }
+        if (egress.getOperators() != null) {
+          for (final String operator : egress.getOperators()) {
+            if (ProcessingPolicyGraphHelper.isFieldReducingOperator(operator)) {
+              return true;
+            }
+          }
+        }
+      }
+    }
+    if (path != null && path.getAlgebraExpression() != null) {
+      final String expr = path.getAlgebraExpression().toLowerCase(java.util.Locale.ROOT);
+      if (expr.contains("mapvalues")
+          || expr.contains("map(")
+          || expr.contains("process")
+          || expr.contains("filter")
+          || expr.contains("aggregate")
+          || expr.contains("reduce")
+          || expr.contains("σ[")
+          || expr.contains("σ(")
+          || expr.contains("π[")) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static Set<String> retainedSensitiveForPath(
+      final AppProcessingPolicy.ProcessingPathAnalysis path,
+      final String inputTopic,
+      final String outputTopic,
+      final Set<String> sensitive) {
+    if (path.getOutputFields() != null && !path.getOutputFields().isEmpty()) {
+      final Set<String> fromAgent = retainedFromAgentOutput(path, sensitive);
+      if (!fromAgent.isEmpty() || !path.getDroppedSensitiveFields().isEmpty()) {
+        return fromAgent;
+      }
+    }
+    return RelationalAlgebraTreeVerifier.retainedSensitiveFields(path, inputTopic, outputTopic, sensitive);
+  }
+
+  private static Set<String> retainedFromAgentOutput(
+      final AppProcessingPolicy.ProcessingPathAnalysis path,
+      final Set<String> sensitive) {
+    if (path == null || path.getOutputFields() == null || path.getOutputFields().isEmpty()) {
+      return Set.of();
+    }
+    final Set<String> retained = new LinkedHashSet<>(path.getOutputFields());
+    retained.retainAll(sensitive);
+    return retained;
   }
 }

@@ -36,6 +36,7 @@ public final class AppProcessingPolicy {
   private ProcessingPolicyGraph graph;
   private AggregationAnalysis aggregationAnalysis;
   private RelationalAlgebraAnalysis relationalAlgebraAnalysis;
+  private List<ExternalConnection> externalConnections = new ArrayList<>();
 
   public AppProcessingPolicy() {
     components = Collections.emptyList();
@@ -326,6 +327,37 @@ public final class AppProcessingPolicy {
 
   public void setRelationalAlgebraAnalysis(final RelationalAlgebraAnalysis relationalAlgebraAnalysis) {
     this.relationalAlgebraAnalysis = relationalAlgebraAnalysis;
+  }
+
+  public List<ExternalConnection> getExternalConnections() {
+    return externalConnections == null ? Collections.emptyList() : externalConnections;
+  }
+
+  public void setExternalConnections(final List<ExternalConnection> externalConnections) {
+    this.externalConnections =
+        externalConnections == null ? new ArrayList<>() : externalConnections;
+  }
+
+  @JsonIgnoreProperties(ignoreUnknown = true)
+  public static final class ExternalConnection {
+    private String endpoint;
+    private boolean allowed;
+
+    public String getEndpoint() {
+      return endpoint;
+    }
+
+    public void setEndpoint(final String endpoint) {
+      this.endpoint = endpoint;
+    }
+
+    public boolean isAllowed() {
+      return allowed;
+    }
+
+    public void setAllowed(final boolean allowed) {
+      this.allowed = allowed;
+    }
   }
 
   @JsonIgnoreProperties(ignoreUnknown = true)

@@ -41,6 +41,19 @@ public final class GrantorTagTopology {
     return outputTopicsForTag(tagName);
   }
 
+  public static List<String> tagCarrierTopics(final String tagName) {
+    if (tagName == null || tagName.isEmpty()) {
+      return Collections.emptyList();
+    }
+    return switch (tagName) {
+      case DifcGrantPolicy.TAG_ORDER -> List.of("orders");
+      case DifcGrantPolicy.TAG_FRAUD,
+           DifcGrantPolicy.TAG_INV_VALID,
+           DifcGrantPolicy.TAG_ORDER_VALID -> List.of("order-validations");
+      default -> outputTopicsForTag(tagName);
+    };
+  }
+
   public static boolean ownsTag(final String grantorPrincipal, final String tagName) {
     if (grantorPrincipal == null || tagName == null) {
       return false;
@@ -62,13 +75,17 @@ public final class GrantorTagTopology {
     if (tagName == null || inputTopic == null || inputTopic.isEmpty()) {
       return java.util.Set.of();
     }
-    if (!outputTopicsForTag(tagName).contains(inputTopic)) {
+    if (!tagCarrierTopics(tagName).contains(inputTopic)) {
       return java.util.Set.of();
     }
     if (DifcGrantPolicy.TAG_ORDER.equals(tagName)) {
       return TopicSchemaCatalog.sensitiveOrderFields();
     }
-    return TopicSchemaCatalog.valueFieldsForTopic(inputTopic);
+    final List<String> publishTopics = outputTopicsForTag(tagName);
+    if (publishTopics.contains(inputTopic)) {
+      return TopicSchemaCatalog.valueFieldsForTopic(publishTopics.get(0));
+    }
+    return java.util.Set.of();
   }
 
   /** Running service application id → authenticated SCRAM principal. */

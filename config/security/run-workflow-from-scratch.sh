@@ -2,6 +2,7 @@
 # Wipe, format, start cluster + microservices, seed inventory, post orders, print log summary.
 set -euo pipefail
 source "$(dirname "$0")/_env.sh"
+cd "${SCRIPT_DIR}"
 require_standalone_jar
 
 LOG_ROOT="${LOG_ROOT:-/tmp/ms-workflow-logs}"
@@ -113,6 +114,7 @@ wait_for_orders_http 120
 start_bg fraud-service ./start-fraud-service.sh
 start_bg inventory-service ./start-inventory-service.sh
 start_bg order-details-service ./start-order-details-service.sh
+start_bg email-service ./start-email-service.sh
 sleep 20
 
 start_bg validations-aggregator ./start-validations-aggregator-service.sh
@@ -143,6 +145,7 @@ summarize orders-service '\[OrdersService\]|\[DIFC\]'
 summarize fraud-service '\[FraudService\]|Aggregation decision|validation|DIFC'
 summarize inventory-service '\[InventoryService\]|validation|DIFC'
 summarize order-details-service '\[OrderDetailsService\]|validation|DIFC'
+summarize email-service '\[EmailService\]|DIFC'
 summarize validations-aggregator 'Aggregation decision|DIFC|VALIDATED|FAILED'
 summarize broker-1 'DIFC|GRANT_CAP|ADD_CLIENT_PRIVS|Final message tags'
 summarize broker-2 'DIFC|GRANT_CAP|ADD_CLIENT_PRIVS|Final message tags'

@@ -53,7 +53,7 @@ public class ValidationsAggregatorService implements Service {
   /** Tags stripped from {@code orders} output (label + record union minus declassify header). */
   private static final Set<String> DIFC_OUTPUT_DECLASSIFY_TAGS = difcTagSet(
       DIFC_TAG_FRAUD, DIFC_TAG_INV_VALID, DIFC_TAG_ORDER_VALID, "order");
-  /** Tag on {@code orders} from OrdersService; needed to read/join tagged orders. */
+  /** Tag on {@code orders} from OrdersService; required to FETCH order-tagged records for join. */
   private static final String DIFC_ORDER_TAG = "order";
   private final Consumed<String, OrderValidation> serdes1 = Consumed
       .with(ORDER_VALIDATIONS.keySerde(), ORDER_VALIDATIONS.valueSerde());
