@@ -30,6 +30,11 @@ grep -E '\[DIFC\] (grantPrivilege|grantDenied|grantPolicyVerified|grantExternalV
   "${LOG_ROOT}/orders-service.log" 2>/dev/null | tail -30 || echo "(no grant lines on orders-service)"
 
 echo
+echo "=== Expression lineage verification (grantor) ==="
+grep -E '\[DIFC\] grantLineageVerify' "${LOG_ROOT}/orders-service.log" 2>/dev/null | tail -40 \
+  || echo "(no grantLineageVerify lines — rebuild standalone JAR if missing)"
+
+echo
 echo "=== DIFC requester summary (validators + aggregator) ==="
 grep -E '\[DIFC\] (requestGrantCap|addTag|attestedPolicyReady|registerClient|DIFC grants ready)' \
   "${LOG_ROOT}/fraud-service.log" \

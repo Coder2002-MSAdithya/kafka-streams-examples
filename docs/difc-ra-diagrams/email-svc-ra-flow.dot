@@ -2,26 +2,26 @@ digraph ra {
   graph [rankdir=TB, bgcolor="white", fontname="Helvetica", splines=ortho, nodesep=0.35, ranksep=0.5, ordering="out"];
   node [fontname="Helvetica", fontsize=11, style=filled, height=0.3, margin="0.08,0.04"];
   edge [fontname="Helvetica", color="#444444", arrowsize=0.65];
-  label="EmailService (email-svc)\nRelational algebra (tree)";
+  label="EmailService (email-svc)\nRelational algebra (tree)\nσ=select  π=project  γ=aggregate  γ_g=group-by-key  ω=window  ⋈=join  ∪=union";
   labelloc=t;
   fontsize=14;
   subgraph cluster_0 {
     label="orders, payments, customers → orders-enriched"; style=rounded; color="#adb5bd"; fontsize=10;
-    r0t0 [label="Sink(orders-enriched)", shape=ellipse, style="filled", fillcolor="#d4edda"];
-    r0t1 [label="⋈\nπ: product, id, state, customerId, quantity, +5", shape=hexagon, style="filled", fillcolor="#fff3cd"];
-    r0t2 [label="stream\nπ: product, id, state, customerId, quantity, +1", shape=box, style="rounded,filled", fillcolor="#e8f4fc"];
-    r0t3 [label="Scan(orders)", shape=ellipse, style="filled", fillcolor="#d4edda"];
-    r0t3 -> r0t2;
-    r0t2 -> r0t1;
-    r0t4 [label="Scan(payments)", shape=ellipse, style="filled", fillcolor="#d4edda"];
-    r0t4 -> r0t1;
-    r0t5 [label="Scan(customers)", shape=ellipse, style="filled", fillcolor="#d4edda"];
-    r0t5 -> r0t1;
-    r0t1 -> r0t0;
+    p0_sink_orders_enriched [label="Sink(orders-enriched)", shape=ellipse, style="filled", fillcolor="#d4edda"];
+    p0_join_1 [label="⋈: orders, payments, customers", shape=hexagon, style="filled", fillcolor="#fff3cd"];
+    p0_stream_stream_2 [label="stream: price, product, id, state, customerId, … (+1 more)", shape=box, style="rounded,filled", fillcolor="#e8f4fc"];
+    p0_scan_orders [label="Scan(orders)", shape=ellipse, style="filled", fillcolor="#d4edda"];
+    p0_scan_orders -> p0_stream_stream_2;
+    p0_stream_stream_2 -> p0_join_1;
+    p0_scan_payments [label="Scan(payments)", shape=ellipse, style="filled", fillcolor="#d4edda"];
+    p0_scan_payments -> p0_join_1;
+    p0_scan_customers [label="Scan(customers)", shape=ellipse, style="filled", fillcolor="#d4edda"];
+    p0_scan_customers -> p0_join_1;
+    p0_join_1 -> p0_sink_orders_enriched;
     r0anchor [style=invis, width=0, height=0, label=""];
-    r0t0 -> r0anchor [style=invis];
+    p0_sink_orders_enriched -> r0anchor [style=invis];
     r0anchor -> r0note [style=invis];
-    r0note [label="out: product, id, state, customerId, quantity, +5\nin: product, id, state, customerId, quantity, +5", shape=note, fillcolor="#f8f9fa", fontsize=10];
+    r0note [label="out: price, product, id, state, customerId, … (+5 more)\nin: price, product, id, state, customerId, … (+5 more)", shape=note, fillcolor="#f8f9fa", fontsize=10];
     { rank=max; r0note; }
   }
 }

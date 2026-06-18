@@ -29,15 +29,35 @@ public final class GrantRelationalAlgebraVerifier {
     if (path.getExpressionTree() == null) {
       return false;
     }
-    if (agentPathAnalysisSanitizes(path, ownedTag, inputTopic, policy, outputTopic)) {
-      return true;
+    final java.util.Map<String, FieldLineage> egressLineages =
+        FieldLineageEvaluator.evaluateEgressLineages(path.getExpressionTree(), outputTopic);
+    GrantLineageVerificationLog.verifyingPath(
+        ownedTag, inputTopic, outputTopic, egressLineages.size());
+    if (!egressLineages.isEmpty()) {
+      final boolean lineageSanitized =
+          ExpressionLineageVerifier.scanSanitizesTaggedInput(
+              path, ownedTag, inputTopic, outputTopic);
+      GrantLineageVerificationLog.verificationPath(
+          ownedTag, inputTopic, outputTopic, "expression-lineage", lineageSanitized);
+      return lineageSanitized;
     }
     if (RelationalAlgebraTreeVerifier.scanSanitizesTaggedInput(
         path, ownedTag, inputTopic, outputTopic)) {
+      GrantLineageVerificationLog.verificationPath(
+          ownedTag, inputTopic, outputTopic, "relational-algebra-tree", true);
       return true;
     }
-    return PipelineProjectionRegistry.satisfiesDeclassifyViaProjection(
-        policy, path, ownedTag, inputTopic, outputTopic);
+    if (agentPathAnalysisSanitizes(path, ownedTag, inputTopic, policy, outputTopic)) {
+      GrantLineageVerificationLog.verificationPath(
+          ownedTag, inputTopic, outputTopic, "agent-path-analysis", true);
+      return true;
+    }
+    final boolean projectionSanitized =
+        PipelineProjectionRegistry.satisfiesDeclassifyViaProjection(
+            policy, path, ownedTag, inputTopic, outputTopic);
+    GrantLineageVerificationLog.verificationPath(
+        ownedTag, inputTopic, outputTopic, "pipeline-projection", projectionSanitized);
+    return projectionSanitized;
   }
 
   public static String denialReason(
@@ -216,6 +236,9 @@ public final class GrantRelationalAlgebraVerifier {
       final String inputTopic,
       final String outputTopic,
       final Set<String> sensitive) {
+    if (path.getExpressionTree() != null) {
+      return ExpressionLineageVerifier.retainedSensitiveFields(path, inputTopic, outputTopic, sensitive);
+    }
     if (path.getOutputFields() != null && !path.getOutputFields().isEmpty()) {
       final Set<String> fromAgent = retainedFromAgentOutput(path, sensitive);
       if (!fromAgent.isEmpty() || !path.getDroppedSensitiveFields().isEmpty()) {

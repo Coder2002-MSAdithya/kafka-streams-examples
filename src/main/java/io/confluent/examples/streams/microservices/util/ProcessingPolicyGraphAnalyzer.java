@@ -90,6 +90,8 @@ public final class ProcessingPolicyGraphAnalyzer {
               + grantorPublishTopics
               + "); RA sanitizes sensitive fields");
     }
+    GrantLineageVerificationLog.republicationFastPath(
+        ownedTag, grantorPrincipal, consumedFromGrantorPublish);
     return DifcTagPolicyVerifier.VerificationResult.allow(
         "policy verified: requester consumes grantor publish topic(s) "
             + consumedFromGrantorPublish

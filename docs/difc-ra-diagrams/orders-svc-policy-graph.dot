@@ -11,8 +11,8 @@ digraph policy {
   n_op_3 [label="toStream", shape=box, fillcolor="#cce5ff"];
   n_stream_4 [label="KStream", shape=ellipse, fillcolor="#fdebd0"];
   n_op_5 [label="filter", shape=box, fillcolor="#cce5ff"];
-  n_store_org_apache_kafka_streams_processor_internals_StoreFactory_FactoryWrappingStoreBuilder_7878bbdb [label="state store", shape=cylinder, fillcolor="#e8daef"];
-  n_store_org_apache_kafka_streams_kstream_internals_KeyValueStoreMaterializer_7878bbdb [label="state store", shape=cylinder, fillcolor="#e8daef"];
+  n_store_org_apache_kafka_streams_processor_internals_StoreFactory_FactoryWrappingStoreBuilder_2e1ba142 [label="state store", shape=cylinder, fillcolor="#e8daef"];
+  n_store_org_apache_kafka_streams_kstream_internals_KeyValueStoreMaterializer_2e1ba142 [label="state store", shape=cylinder, fillcolor="#e8daef"];
   n_comp_app_client [label="application (REST/producer)", shape=box, fillcolor="#f0f0f0"];
   n_comp_app_client_producer_op_0 [label="producer()", shape=box, fillcolor="#cce5ff"];
   n_comp_app_client_producer_op_1 [label="sendWithTags()", shape=box, fillcolor="#cce5ff"];

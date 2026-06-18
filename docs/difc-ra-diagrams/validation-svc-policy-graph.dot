@@ -1,0 +1,17 @@
+digraph policy {
+  graph [rankdir=TB, bgcolor="white", fontname="Helvetica", splines=polyline, nodesep=0.45, ranksep=0.55];
+  node [fontname="Helvetica", fontsize=11, style=filled, height=0.35];
+  edge [fontname="Helvetica", fontsize=9, color="#444444", arrowsize=0.7];
+  label="ValidationService (validation-svc)\nProcessing policy graph (agent topology)";
+  labelloc=t;
+  fontsize=14;
+  n_comp_app_client [label="application (kafka-client)", shape=box, fillcolor="#f0f0f0"];
+  n_topic_STOCK_CHECK_EVENT_TOPIC [label="STOCK_CHECK_EVENT_TOPIC", shape=ellipse, fillcolor="#d4edda"];
+  n_comp_ValidationService [label="ValidationService (REST/producer)", shape=box, fillcolor="#f0f0f0"];
+  n_topic_VALIDATION_EVENT_TOPIC [label="VALIDATION_EVENT_TOPIC", shape=ellipse, fillcolor="#d4edda"];
+  n_comp_ValidationService_op_0 [label="forValidation()\nπ: customerId, isNumberValid", shape=box, fillcolor="#cce5ff"];
+  n_topic_STOCK_CHECK_EVENT_TOPIC -> n_comp_app_client [label="ingress"];
+  n_topic_STOCK_CHECK_EVENT_TOPIC -> n_comp_ValidationService [label="ingress"];
+  n_topic_STOCK_CHECK_EVENT_TOPIC -> n_comp_ValidationService_op_0 [label="source"];
+  n_comp_ValidationService_op_0 -> n_topic_VALIDATION_EVENT_TOPIC [label="writes"];
+}

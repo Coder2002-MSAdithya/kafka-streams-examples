@@ -26,9 +26,9 @@ digraph policy {
   n_op_17 [label="addTags", shape=box, fillcolor="#cce5ff"];
   n_op_18 [label="to", shape=box, fillcolor="#cce5ff"];
   n_topic_order_validations [label="order-validations", shape=ellipse, fillcolor="#d4edda"];
-  n_store_org_apache_kafka_streams_processor_internals_StoreFactory_FactoryWrappingStoreBuilder_32bb0072 [label="state store", shape=cylinder, fillcolor="#e8daef"];
-  n_store_org_apache_kafka_streams_kstream_internals_KeyValueStoreMaterializer_32bb0072 [label="state store", shape=cylinder, fillcolor="#e8daef"];
-  n_store_org_apache_kafka_streams_processor_internals_StoreBuilderWrapper_427a12b6 [label="state store", shape=cylinder, fillcolor="#e8daef"];
+  n_store_org_apache_kafka_streams_processor_internals_StoreFactory_FactoryWrappingStoreBuilder_dd4aec3 [label="state store", shape=cylinder, fillcolor="#e8daef"];
+  n_store_org_apache_kafka_streams_kstream_internals_KeyValueStoreMaterializer_dd4aec3 [label="state store", shape=cylinder, fillcolor="#e8daef"];
+  n_store_org_apache_kafka_streams_processor_internals_StoreBuilderWrapper_568750b7 [label="state store", shape=cylinder, fillcolor="#e8daef"];
   n_internal_KSTREAM_FILTER_0000000007_repartition [label="repartition\nKSTREAM-FILTER-0000000007-reparti...", shape=ellipse, fillcolor="#fff3cd"];
   n_comp_InventoryService [label="InventoryService (REST/producer)", shape=box, fillcolor="#f0f0f0"];
   n_comp_InventoryService_ktable_warehouse_inventory [label="KTable[aggregated-state]", shape=ellipse, fillcolor="#fdebd0"];

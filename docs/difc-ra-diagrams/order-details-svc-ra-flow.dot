@@ -2,22 +2,22 @@ digraph ra {
   graph [rankdir=TB, bgcolor="white", fontname="Helvetica", splines=ortho, nodesep=0.35, ranksep=0.5, ordering="out"];
   node [fontname="Helvetica", fontsize=11, style=filled, height=0.3, margin="0.08,0.04"];
   edge [fontname="Helvetica", color="#444444", arrowsize=0.65];
-  label="OrderDetailsService (order-details-svc)\nRelational algebra (tree)";
+  label="OrderDetailsService (order-details-svc)\nRelational algebra (tree)\nσ=select  π=project  γ=aggregate  γ_g=group-by-key  ω=window  ⋈=join  ∪=union";
   labelloc=t;
   fontsize=14;
   subgraph cluster_0 {
     label="orders → order-validations"; style=rounded; color="#adb5bd"; fontsize=10;
-    r0t0 [label="Sink(order-validations)", shape=ellipse, style="filled", fillcolor="#d4edda"];
-    r0t1 [label="σ\nσ: id; π: checkType, orderId, validationResult", shape=box, style="rounded,filled", fillcolor="#e8f4fc"];
-    r0t2 [label="π\nπ: checkType, orderId, validationResult", shape=box, style="rounded,filled", fillcolor="#e8f4fc"];
-    r0t3 [label="Scan(orders)", shape=ellipse, style="filled", fillcolor="#d4edda"];
-    r0t3 -> r0t2;
-    r0t2 -> r0t1;
-    r0t1 -> r0t0;
+    p0_sink_order_validations [label="Sink(order-validations)", shape=ellipse, style="filled", fillcolor="#d4edda"];
+    p0_sigma_order_state_crea_1 [label="σ: order.state = CREATED", shape=box, style="rounded,filled", fillcolor="#e8f4fc"];
+    p0_pi_orderid_id_2 [label="π: orderId←id, validationResult: quantity≥0 ∧ price≥0 ∧ product≠∅", shape=box, style="rounded,filled", fillcolor="#e8f4fc"];
+    p0_scan_orders [label="Scan(orders)", shape=ellipse, style="filled", fillcolor="#d4edda"];
+    p0_scan_orders -> p0_pi_orderid_id_2;
+    p0_pi_orderid_id_2 -> p0_sigma_order_state_crea_1;
+    p0_sigma_order_state_crea_1 -> p0_sink_order_validations;
     r0anchor [style=invis, width=0, height=0, label=""];
-    r0t0 -> r0anchor [style=invis];
+    p0_sink_order_validations -> r0anchor [style=invis];
     r0anchor -> r0note [style=invis];
-    r0note [label="out: checkType, orderId, validationResult\ndropped: state, customerId, quantity, price, product", shape=note, fillcolor="#f8f9fa", fontsize=10];
+    r0note [label="out: orderId, checkType, validationResult\ndropped: price, product, state, customerId, quantity", shape=note, fillcolor="#f8f9fa", fontsize=10];
     { rank=max; r0note; }
   }
 }

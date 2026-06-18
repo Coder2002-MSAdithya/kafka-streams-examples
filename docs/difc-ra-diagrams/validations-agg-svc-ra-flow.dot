@@ -2,35 +2,35 @@ digraph ra {
   graph [rankdir=TB, bgcolor="white", fontname="Helvetica", splines=ortho, nodesep=0.35, ranksep=0.5, ordering="out"];
   node [fontname="Helvetica", fontsize=11, style=filled, height=0.3, margin="0.08,0.04"];
   edge [fontname="Helvetica", color="#444444", arrowsize=0.65];
-  label="ValidationsAggregatorService (validations-agg-svc)\nRelational algebra (tree)";
+  label="ValidationsAggregatorService (validations-agg-svc)\nRelational algebra (tree)\nσ=select  π=project  γ=aggregate  γ_g=group-by-key  ω=window  ⋈=join  ∪=union";
   labelloc=t;
   fontsize=14;
   subgraph cluster_0 {
     label="order-validations, orders → orders"; style=rounded; color="#adb5bd"; fontsize=10;
-    r0t0 [label="Sink(orders)", shape=ellipse, style="filled", fillcolor="#d4edda"];
-    r0t1 [label="∪\nπ: _aggregate_value, quantity, price, product, id, +2", shape=diamond, style="filled", fillcolor="#ffe8cc"];
-    r0t2 [label="π_k\nπ: _aggregate_value, quantity, price, product, id, +2", shape=box, style="rounded,filled", fillcolor="#e8f4fc"];
-    r0t3 [label="γ\nπ: _aggregate_value, quantity, price, product, id, +2", shape=box, style="rounded,filled", fillcolor="#fff3cd"];
-    r0t4 [label="⋈\nπ: _aggregate_value, quantity, price, product, id, +2", shape=hexagon, style="filled", fillcolor="#fff3cd"];
-    r0t5 [label="γ\nπ: _aggregate_value", shape=box, style="rounded,filled", fillcolor="#fff3cd"];
-    r0t6 [label="σ\nπ: orderId, validationResult, checkType", shape=box, style="rounded,filled", fillcolor="#e8f4fc"];
-    r0t7 [label="γ\nπ: orderId, validationResult, checkType", shape=box, style="rounded,filled", fillcolor="#fff3cd"];
-    r0t8 [label="Scan(order-validations)", shape=ellipse, style="filled", fillcolor="#d4edda"];
-    r0t8 -> r0t7;
-    r0t7 -> r0t6;
-    r0t6 -> r0t5;
-    r0t5 -> r0t4;
-    r0t9 [label="Scan(orders)", shape=ellipse, style="filled", fillcolor="#d4edda"];
-    r0t9 -> r0t4;
-    { rank=same; r0t5; r0t9; }
-    r0t4 -> r0t3;
-    r0t3 -> r0t2;
-    r0t2 -> r0t1;
-    r0t1 -> r0t0;
+    p0_sink_orders [label="Sink(orders)", shape=ellipse, style="filled", fillcolor="#d4edda"];
+    p0_union_1 [label="∪: union branches", shape=diamond, style="filled", fillcolor="#ffe8cc"];
+    p0_rekey_selectkey_2 [label="π_k: rekey", shape=box, style="rounded,filled", fillcolor="#e8f4fc"];
+    p0_window_3 [label="ω: session/window", shape=box, style="rounded,filled", fillcolor="#fff8e1"];
+    p0_join_4 [label="⋈: order-validations, orders", shape=hexagon, style="filled", fillcolor="#fff3cd"];
+    p0_gamma_aggregate_5 [label="γ: aggregate(validations)", shape=box, style="rounded,filled", fillcolor="#fff3cd"];
+    p0_sigma_filter_6 [label="σ: filter", shape=box, style="rounded,filled", fillcolor="#e8f4fc"];
+    p0_group_groupbykey_7 [label="γ_g: group by key", shape=box, style="rounded,filled", fillcolor="#fff3cd"];
+    p0_scan_order_validations [label="Scan(order-validations)", shape=ellipse, style="filled", fillcolor="#d4edda"];
+    p0_scan_order_validations -> p0_group_groupbykey_7;
+    p0_group_groupbykey_7 -> p0_sigma_filter_6;
+    p0_sigma_filter_6 -> p0_gamma_aggregate_5;
+    p0_gamma_aggregate_5 -> p0_join_4;
+    p0_scan_orders [label="Scan(orders)", shape=ellipse, style="filled", fillcolor="#d4edda"];
+    p0_scan_orders -> p0_join_4;
+    { rank=same; p0_gamma_aggregate_5; p0_scan_orders; }
+    p0_join_4 -> p0_window_3;
+    p0_window_3 -> p0_rekey_selectkey_2;
+    p0_rekey_selectkey_2 -> p0_union_1;
+    p0_union_1 -> p0_sink_orders;
     r0anchor [style=invis, width=0, height=0, label=""];
-    r0t0 -> r0anchor [style=invis];
+    p0_sink_orders -> r0anchor [style=invis];
     r0anchor -> r0note [style=invis];
-    r0note [label="out: _aggregate_value, quantity, price, product, id, +2\nin: orderId, validationResult, checkType, quantity, price, +4", shape=note, fillcolor="#f8f9fa", fontsize=10];
+    r0note [label="out: customerId, state, id, product, price, … (+1 more)\nin: orderId, checkType, validationResult, customerId, state, … (+4 more)", shape=note, fillcolor="#f8f9fa", fontsize=10];
     { rank=max; r0note; }
   }
 }

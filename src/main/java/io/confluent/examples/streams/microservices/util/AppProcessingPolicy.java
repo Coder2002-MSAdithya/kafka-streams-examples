@@ -705,6 +705,10 @@ public final class AppProcessingPolicy {
     private String topic;
     private List<RelationalAlgebraExpressionNode> children = new ArrayList<>();
     private List<String> outputFields = new ArrayList<>();
+    private List<String> selectionFields = new ArrayList<>();
+    private String selectionExpression = "";
+    private List<String> keyFields = new ArrayList<>();
+    private List<FieldLineage> fieldLineages = new ArrayList<>();
 
     public String getKind() {
       return kind;
@@ -752,6 +756,38 @@ public final class AppProcessingPolicy {
 
     public void setOutputFields(final List<String> outputFields) {
       this.outputFields = outputFields == null ? new ArrayList<>() : outputFields;
+    }
+
+    public List<String> getSelectionFields() {
+      return selectionFields == null ? Collections.emptyList() : selectionFields;
+    }
+
+    public void setSelectionFields(final List<String> selectionFields) {
+      this.selectionFields = selectionFields == null ? new ArrayList<>() : selectionFields;
+    }
+
+    public String getSelectionExpression() {
+      return selectionExpression == null ? "" : selectionExpression;
+    }
+
+    public void setSelectionExpression(final String selectionExpression) {
+      this.selectionExpression = selectionExpression == null ? "" : selectionExpression;
+    }
+
+    public List<String> getKeyFields() {
+      return keyFields == null ? Collections.emptyList() : keyFields;
+    }
+
+    public void setKeyFields(final List<String> keyFields) {
+      this.keyFields = keyFields == null ? new ArrayList<>() : keyFields;
+    }
+
+    public List<FieldLineage> getFieldLineages() {
+      return fieldLineages == null ? Collections.emptyList() : fieldLineages;
+    }
+
+    public void setFieldLineages(final List<FieldLineage> fieldLineages) {
+      this.fieldLineages = fieldLineages == null ? new ArrayList<>() : fieldLineages;
     }
   }
 }

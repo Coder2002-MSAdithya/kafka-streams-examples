@@ -2,29 +2,29 @@ digraph ra {
   graph [rankdir=TB, bgcolor="white", fontname="Helvetica", splines=ortho, nodesep=0.35, ranksep=0.5, ordering="out"];
   node [fontname="Helvetica", fontsize=11, style=filled, height=0.3, margin="0.08,0.04"];
   edge [fontname="Helvetica", color="#444444", arrowsize=0.65];
-  label="InventoryService (inventory-svc)\nRelational algebra (tree)";
+  label="InventoryService (inventory-svc)\nRelational algebra (tree)\nσ=select  π=project  γ=aggregate  γ_g=group-by-key  ω=window  ⋈=join  ∪=union";
   labelloc=t;
   fontsize=14;
   subgraph cluster_0 {
     label="warehouse-inventory, orders → order-validations"; style=rounded; color="#adb5bd"; fontsize=10;
-    r0t0 [label="Sink(order-validations)", shape=ellipse, style="filled", fillcolor="#d4edda"];
-    r0t1 [label="π\nπ: checkType, orderId, validationResult", shape=box, style="rounded,filled", fillcolor="#e8f4fc"];
-    r0t2 [label="π_k\nπ: checkType, orderId, validationResult", shape=box, style="rounded,filled", fillcolor="#e8f4fc"];
-    r0t3 [label="⋈\nπ: quantity, id, product, price, customerId, +1", shape=hexagon, style="filled", fillcolor="#fff3cd"];
-    r0t4 [label="σ\nπ: quantity", shape=box, style="rounded,filled", fillcolor="#e8f4fc"];
-    r0t5 [label="Scan(warehouse-inventory)", shape=ellipse, style="filled", fillcolor="#d4edda"];
-    r0t5 -> r0t4;
-    r0t4 -> r0t3;
-    r0t6 [label="Scan(orders)", shape=ellipse, style="filled", fillcolor="#d4edda"];
-    r0t6 -> r0t3;
-    { rank=same; r0t4; r0t6; }
-    r0t3 -> r0t2;
-    r0t2 -> r0t1;
-    r0t1 -> r0t0;
+    p0_sink_order_validations [label="Sink(order-validations)", shape=ellipse, style="filled", fillcolor="#d4edda"];
+    p0_pi_orderid_1 [label="π: orderId, checkType, validationResult", shape=box, style="rounded,filled", fillcolor="#e8f4fc"];
+    p0_rekey_selectkey_2 [label="π_k: rekey", shape=box, style="rounded,filled", fillcolor="#e8f4fc"];
+    p0_join_3 [label="⋈: warehouse-inventory, orders", shape=hexagon, style="filled", fillcolor="#fff3cd"];
+    p0_sigma_tombstone_order__4 [label="σ: ¬ tombstone ∧ order.state = CREATED", shape=box, style="rounded,filled", fillcolor="#e8f4fc"];
+    p0_scan_warehouse_inventory [label="Scan(warehouse-inventory)", shape=ellipse, style="filled", fillcolor="#d4edda"];
+    p0_scan_warehouse_inventory -> p0_sigma_tombstone_order__4;
+    p0_sigma_tombstone_order__4 -> p0_join_3;
+    p0_scan_orders [label="Scan(orders)", shape=ellipse, style="filled", fillcolor="#d4edda"];
+    p0_scan_orders -> p0_join_3;
+    { rank=same; p0_sigma_tombstone_order__4; p0_scan_orders; }
+    p0_join_3 -> p0_rekey_selectkey_2;
+    p0_rekey_selectkey_2 -> p0_pi_orderid_1;
+    p0_pi_orderid_1 -> p0_sink_order_validations;
     r0anchor [style=invis, width=0, height=0, label=""];
-    r0t0 -> r0anchor [style=invis];
+    p0_sink_order_validations -> r0anchor [style=invis];
     r0anchor -> r0note [style=invis];
-    r0note [label="out: checkType, orderId, validationResult\ndropped: quantity, product, price, customerId, state", shape=note, fillcolor="#f8f9fa", fontsize=10];
+    r0note [label="out: orderId, checkType, validationResult\ndropped: quantity, product, price, customerId, state", shape=note, fillcolor="#f8f9fa", fontsize=10];
     { rank=max; r0note; }
   }
 }
