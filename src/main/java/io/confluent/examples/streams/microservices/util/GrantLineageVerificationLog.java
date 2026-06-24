@@ -70,6 +70,26 @@ public final class GrantLineageVerificationLog {
         sanitized);
   }
 
+  public static void taintDecision(
+      final String ownedTag,
+      final String inputTopic,
+      final String outputTopic,
+      final Set<String> taggedSensitive,
+      final java.util.List<AppProcessingPolicy.SourceFieldTaintStatus> sourceFieldTaint,
+      final Set<String> unsanitized,
+      final boolean sanitized) {
+    System.out.printf(
+        "[DIFC] grantLineageVerify phase=taint-report tag=%s path=%s→%s "
+            + "sensitiveOnInput=%s sourceFieldTaint=%s unsanitized=%s sanitized=%s%n",
+        ownedTag,
+        inputTopic,
+        outputTopic,
+        taggedSensitive,
+        summarizeTaint(sourceFieldTaint),
+        unsanitized,
+        sanitized);
+  }
+
   private static String summarizeLineages(final Map<String, FieldLineage> egressLineages) {
     if (egressLineages == null || egressLineages.isEmpty()) {
       return "[]";
@@ -92,6 +112,23 @@ public final class GrantLineageVerificationLog {
               }
               return e.getKey() + "=" + expr + "(" + kind + ", src=" + sources + ")";
             })
+        .collect(Collectors.joining("; ", "[", "]"));
+  }
+
+  private static String summarizeTaint(
+      final java.util.List<AppProcessingPolicy.SourceFieldTaintStatus> sourceFieldTaint) {
+    if (sourceFieldTaint == null || sourceFieldTaint.isEmpty()) {
+      return "[]";
+    }
+    return sourceFieldTaint.stream()
+        .map(
+            status ->
+                status.getSourceField()
+                    + "="
+                    + status.getStatus()
+                    + "(sink="
+                    + status.getSinkFields()
+                    + ")")
         .collect(Collectors.joining("; ", "[", "]"));
   }
 }

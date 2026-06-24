@@ -15,6 +15,20 @@ public final class DifcExternalConnectionVerifier {
   public static DifcTagPolicyVerifier.VerificationResult verifyCanAdd(final String requesterPrincipal)
       throws IOException {
     final AppProcessingPolicy policy = DifcTagPolicyVerifier.loadRequesterPolicy(requesterPrincipal);
+    return verifyCanAdd(requesterPrincipal, policy);
+  }
+
+  public static DifcTagPolicyVerifier.VerificationResult verifyCanAdd(
+      final String requesterPrincipal,
+      final byte[] policyBytes) throws IOException {
+    final AppProcessingPolicy policy =
+        DifcTagPolicyVerifier.loadRequesterPolicyFromBytes(requesterPrincipal, policyBytes);
+    return verifyCanAdd(requesterPrincipal, policy);
+  }
+
+  private static DifcTagPolicyVerifier.VerificationResult verifyCanAdd(
+      final String requesterPrincipal,
+      final AppProcessingPolicy policy) {
     final Set<String> observed = observedEndpoints(policy);
     observed.removeAll(kafkaBootstrapEndpoints());
     final Set<String> expected = expectedEndpoints(requesterPrincipal);

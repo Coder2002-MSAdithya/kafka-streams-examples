@@ -28,6 +28,8 @@ public final class PolicyAttestationVerifier {
 
   public static final String TRUSTED_CA_PATH_PROP = "policy.grantor.trusted.ca.path";
   private static final String FALLBACK_CA_PATH_PROP = "policy.agent.trusted.ca.path";
+  private static final String TRUSTED_CA_PATH_ENV = "POLICY_GRANTOR_TRUSTED_CA_PATH";
+  private static final String FALLBACK_CA_PATH_ENV = "POLICY_AGENT_TRUSTED_CA_PATH";
 
   private PolicyAttestationVerifier() {
   }
@@ -36,13 +38,22 @@ public final class PolicyAttestationVerifier {
       final String requesterPrincipal,
       final AttestedProcessingPolicy attestation) {
     Objects.requireNonNull(requesterPrincipal, "requesterPrincipal");
+    System.out.printf(
+        "[DIFC] attestationVerify requester=%s phase=start format=%s%n",
+        requesterPrincipal, attestation == null ? "null" : attestation.getFormat());
     if (attestation == null) {
       return DifcTagPolicyVerifier.VerificationResult.deny("no attested processing-policy for requester");
     }
     final DifcTagPolicyVerifier.VerificationResult formatCheck = validateEnvelopeFormat(attestation);
     if (!formatCheck.allowed()) {
+      System.out.printf(
+          "[DIFC] attestationVerify requester=%s phase=format-check ok=false reason=\"%s\"%n",
+          requesterPrincipal, formatCheck.reason());
       return formatCheck;
     }
+    System.out.printf(
+        "[DIFC] attestationVerify requester=%s phase=format-check ok=true%n",
+        requesterPrincipal);
 
     try {
       final byte[] payload = Base64.getDecoder().decode(attestation.getSignedPayloadBase64());
@@ -50,17 +61,41 @@ public final class PolicyAttestationVerifier {
       final X509Certificate signerCert = parseCertificate(attestation.getCertificatePem());
 
       if (!verifyCertificateChain(signerCert)) {
+        System.out.printf(
+            "[DIFC] attestationVerify requester=%s phase=cert-chain ok=false%n",
+            requesterPrincipal);
         return DifcTagPolicyVerifier.VerificationResult.deny(
             "untrusted policy signing certificate chain");
       }
+      System.out.printf(
+          "[DIFC] attestationVerify requester=%s phase=cert-chain ok=true subject=\"%s\"%n",
+          requesterPrincipal, signerCert.getSubjectX500Principal().getName());
+
       if (!verifySignature(attestation, signerCert, payload, signatureBytes)) {
+        System.out.printf(
+            "[DIFC] attestationVerify requester=%s phase=ecdsa-sig ok=false%n",
+            requesterPrincipal);
         return DifcTagPolicyVerifier.VerificationResult.deny("invalid ECDSA policy signature");
       }
+      System.out.printf(
+          "[DIFC] attestationVerify requester=%s phase=ecdsa-sig ok=true algorithm=%s%n",
+          requesterPrincipal,
+          attestation.getSignatureAlgorithm() != null
+              ? attestation.getSignatureAlgorithm()
+              : "SHA256withECDSA");
 
       final AppProcessingPolicy policy =
           AppProcessingPolicy.readFromCanonicalJson(new String(payload, StandardCharsets.UTF_8));
-      return validateSignedPolicyPrincipal(requesterPrincipal, policy);
+      final DifcTagPolicyVerifier.VerificationResult principalCheck =
+          validateSignedPolicyPrincipal(requesterPrincipal, policy);
+      System.out.printf(
+          "[DIFC] attestationVerify requester=%s phase=principal-match ok=%s%n",
+          requesterPrincipal, principalCheck.allowed());
+      return principalCheck;
     } catch (final Exception e) {
+      System.out.printf(
+          "[DIFC] attestationVerify requester=%s phase=exception msg=\"%s\"%n",
+          requesterPrincipal, e.getMessage());
       return DifcTagPolicyVerifier.VerificationResult.deny(
           "policy attestation verification failed: " + e.getMessage());
     }
@@ -69,7 +104,37 @@ public final class PolicyAttestationVerifier {
   public static LoadedAttestedPolicy loadAndVerifyAttestation(final String requesterPrincipal)
       throws IOException {
     final Path path = DifcTagPolicyVerifier.policyPathForRequester(requesterPrincipal);
+    System.out.printf(
+        "[DIFC] attestationLoad requester=%s path=%s exists=%s%n",
+        requesterPrincipal, path, java.nio.file.Files.exists(path));
     final AttestedProcessingPolicy attestation = AttestedProcessingPolicy.readFromFile(path);
+    final DifcTagPolicyVerifier.VerificationResult crypto =
+        verifyAttestation(requesterPrincipal, attestation);
+    if (!crypto.allowed()) {
+      System.out.printf(
+          "[DIFC] attestationLoad requester=%s phase=denied reason=\"%s\"%n",
+          requesterPrincipal, crypto.reason());
+      return new LoadedAttestedPolicy(null, crypto);
+    }
+    final byte[] payload = Base64.getDecoder().decode(attestation.getSignedPayloadBase64());
+    final AppProcessingPolicy policy =
+        AppProcessingPolicy.readFromCanonicalJson(new String(payload, StandardCharsets.UTF_8));
+    System.out.printf(
+        "[DIFC] attestationLoad requester=%s phase=ok policy-principal=%s%n",
+        requesterPrincipal, policy != null ? policy.getPrincipal() : "null");
+    return new LoadedAttestedPolicy(policy, crypto);
+  }
+
+  public static LoadedAttestedPolicy loadAndVerifyAttestationFromBytes(
+      final String requesterPrincipal,
+      final byte[] policyBytes) throws IOException {
+    if (policyBytes == null || policyBytes.length == 0) {
+      return new LoadedAttestedPolicy(
+          null,
+          DifcTagPolicyVerifier.VerificationResult.deny(
+              "no attested processing-policy in GRANT_CAP request"));
+    }
+    final AttestedProcessingPolicy attestation = AttestedProcessingPolicy.readFromBytes(policyBytes);
     final DifcTagPolicyVerifier.VerificationResult crypto =
         verifyAttestation(requesterPrincipal, attestation);
     if (!crypto.allowed()) {
@@ -145,9 +210,11 @@ public final class PolicyAttestationVerifier {
   }
 
   private static Set<TrustAnchor> loadTrustAnchors() throws Exception {
-    final String configured = System.getProperty(TRUSTED_CA_PATH_PROP);
-    final String fallback = System.getProperty(FALLBACK_CA_PATH_PROP);
-    final String path = configured != null && !configured.isEmpty() ? configured : fallback;
+    final String configured =
+        firstNonBlank(System.getProperty(TRUSTED_CA_PATH_PROP), System.getenv(TRUSTED_CA_PATH_ENV));
+    final String fallback =
+        firstNonBlank(System.getProperty(FALLBACK_CA_PATH_PROP), System.getenv(FALLBACK_CA_PATH_ENV));
+    final String path = firstNonBlank(configured, fallback);
     if (path == null || path.isEmpty()) {
       return Collections.emptySet();
     }
@@ -159,6 +226,18 @@ public final class PolicyAttestationVerifier {
       }
     }
     return anchors;
+  }
+
+  private static String firstNonBlank(final String... values) {
+    if (values == null) {
+      return null;
+    }
+    for (final String value : values) {
+      if (value != null && !value.isBlank()) {
+        return value;
+      }
+    }
+    return null;
   }
 
   public record LoadedAttestedPolicy(

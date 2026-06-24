@@ -51,4 +51,12 @@ public final class AttestedProcessingPolicy {
     }
     return MAPPER.readValue(Files.readString(path), AttestedProcessingPolicy.class);
   }
+
+  public static AttestedProcessingPolicy readFromBytes(final byte[] bytes) throws IOException {
+    Objects.requireNonNull(bytes, "bytes");
+    if (bytes.length == 0) {
+      return null;
+    }
+    return MAPPER.readValue(bytes, AttestedProcessingPolicy.class);
+  }
 }

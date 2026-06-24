@@ -25,12 +25,12 @@ digraph policy {
   n_stream_16 [label="KStream", shape=ellipse, fillcolor="#fdebd0"];
   n_op_17 [label="join", shape=hexagon, fillcolor="#fff3cd"];
   n_op_18 [label="to", shape=box, fillcolor="#cce5ff"];
-  n_topic_io_confluent_examples_streams_microservices_EmailService__Lambda_0x00007fae0032a638_63d5874f [label="io.confluent.examples.streams.microservices.EmailService$$Lambda/0x00007fae0032a638@63d5874f", shape=ellipse, fillcolor="#d4edda"];
+  n_topic_io_confluent_examples_streams_microservices_EmailService__Lambda_0x00007f45ac336248_4b31a708 [label="io.confluent.examples.streams.microservices.EmailService$$Lambda/0x00007f45ac336248@4b31a708", shape=ellipse, fillcolor="#d4edda"];
   n_internal_KSTREAM_PEEK_0000000006_repartition [label="repartition\nKSTREAM-PEEK-0000000006-repartition", shape=ellipse, fillcolor="#fff3cd"];
-  n_store_org_apache_kafka_streams_processor_internals_StoreFactory_FactoryWrappingStoreBuilder_7affc159 [label="state store", shape=cylinder, fillcolor="#e8daef"];
-  n_store_org_apache_kafka_streams_kstream_internals_StreamJoinedStoreFactory_7affc159 [label="state store", shape=cylinder, fillcolor="#e8daef"];
-  n_store_org_apache_kafka_streams_processor_internals_StoreFactory_FactoryWrappingStoreBuilder_3fd05b3e [label="state store", shape=cylinder, fillcolor="#e8daef"];
-  n_store_org_apache_kafka_streams_kstream_internals_StreamJoinedStoreFactory_3fd05b3e [label="state store", shape=cylinder, fillcolor="#e8daef"];
+  n_store_org_apache_kafka_streams_processor_internals_StoreFactory_FactoryWrappingStoreBuilder_228bda54 [label="state store", shape=cylinder, fillcolor="#e8daef"];
+  n_store_org_apache_kafka_streams_kstream_internals_StreamJoinedStoreFactory_228bda54 [label="state store", shape=cylinder, fillcolor="#e8daef"];
+  n_store_org_apache_kafka_streams_processor_internals_StoreFactory_FactoryWrappingStoreBuilder_b3e86d5 [label="state store", shape=cylinder, fillcolor="#e8daef"];
+  n_store_org_apache_kafka_streams_kstream_internals_StreamJoinedStoreFactory_b3e86d5 [label="state store", shape=cylinder, fillcolor="#e8daef"];
   n_comp_app_client [label="application (kafka-client)", shape=box, fillcolor="#f0f0f0"];
   n_topic_EmailService_KSTREAM_JOINTHIS_0000000015_store_changelog [label="EmailService-KSTREAM-JOINTHIS-0000000015-store-changelog", shape=ellipse, fillcolor="#d4edda"];
   n_topic_EmailService_KSTREAM_JOINOTHER_0000000016_store_changelog [label="EmailService-KSTREAM-JOINOTHER-0000000016-store-changelog", shape=ellipse, fillcolor="#d4edda"];
@@ -57,7 +57,7 @@ digraph policy {
   n_stream_13 -> n_op_17 [label="right"];
   n_op_17 -> n_stream_16 [label="output"];
   n_stream_16 -> n_op_18 [label="input"];
-  n_op_18 -> n_topic_io_confluent_examples_streams_microservices_EmailService__Lambda_0x00007fae0032a638_63d5874f [label="writes"];
+  n_op_18 -> n_topic_io_confluent_examples_streams_microservices_EmailService__Lambda_0x00007f45ac336248_4b31a708 [label="writes"];
   n_stream_8 -> n_internal_KSTREAM_PEEK_0000000006_repartition [label="repartition-write"];
   n_topic_EmailService_KSTREAM_JOINTHIS_0000000015_store_changelog -> n_comp_app_client [label="ingress"];
   n_topic_EmailService_KSTREAM_JOINOTHER_0000000016_store_changelog -> n_comp_app_client [label="ingress"];

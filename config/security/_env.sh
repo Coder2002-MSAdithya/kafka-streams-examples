@@ -11,6 +11,8 @@ KAFKA_HOME="${KAFKA_HOME:-$(cd "${EXAMPLES_HOME}/../difc-for-kafka" && pwd)}"
 CONTROLLER_CONFIG="${SCRIPT_DIR}/controller.properties"
 BROKER1_CONFIG="${SCRIPT_DIR}/broker.node1.properties"
 BROKER2_CONFIG="${SCRIPT_DIR}/broker.node2.properties"
+BROKER3_CONFIG="${SCRIPT_DIR}/broker.node3.properties"
+BROKER4_CONFIG="${SCRIPT_DIR}/broker.node4.properties"
 # Legacy single-node combined broker+controller (see broker.standalone.properties)
 BROKER_CONFIG="${SCRIPT_DIR}/broker.standalone.properties"
 
@@ -18,10 +20,13 @@ JAAS_CONFIG="${SCRIPT_DIR}/kafka_server_jaas.conf"
 ADMIN_CONFIG="${SCRIPT_DIR}/admin-client.properties"
 
 # Two-broker cluster bootstrap (SASL listeners)
-export BOOTSTRAP_SERVERS="${BOOTSTRAP_SERVERS:-localhost:9092,localhost:9094}"
+export BOOTSTRAP_SERVERS="${BOOTSTRAP_SERVERS:-localhost:9092,localhost:9094,localhost:9096}"
+export KSE_BROKER_COUNT="${KSE_BROKER_COUNT:-3}"
 export POLICY_AGENT_ALLOWED_EXTERNAL_HOSTS="${POLICY_AGENT_ALLOWED_EXTERNAL_HOSTS:-127.0.0.1:8081,localhost:8081}"
 export STATE_DIR="${STATE_DIR:-/tmp/kafka-streams-examples}"
 export DIFC_ENABLED="${DIFC_ENABLED:-true}"
+export DIFC_AGENT_SANITIZATION_MODE="${DIFC_AGENT_SANITIZATION_MODE:-both}"
+export DIFC_GRANT_SANITIZATION_MODE="${DIFC_GRANT_SANITIZATION_MODE:-lineage}"
 
 export KAFKA_OPTS="-Djava.security.auth.login.config=${JAAS_CONFIG}"
 

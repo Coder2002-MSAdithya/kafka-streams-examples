@@ -7,6 +7,7 @@ source "$(dirname "$0")/_policy_agent.sh"
 LOG_ROOT="${LOG_ROOT:-/tmp/kafka-streams-examples-difc-logs}"
 export LOG_ROOT
 export STATE_DIR
+echo "Sanitization modes: agent=${DIFC_AGENT_SANITIZATION_MODE:-both}, grantor=${DIFC_GRANT_SANITIZATION_MODE:-lineage}"
 mkdir -p "${LOG_ROOT}"
 mkdir -p "${STATE_DIR}/policy"
 rm -rf "${STATE_DIR}/policy"/*
@@ -22,7 +23,7 @@ if [[ ! -f "${STANDALONE_JAR}" ]]; then
 fi
 
 echo "=== Run full microservices workflow (cluster + DIFC grants + orders) ==="
-"$(dirname "$0")/run-workflow-from-scratch.sh" 2>&1 | tee "${LOG_ROOT}/difc-workflow.log"
+"$(dirname "$0")/run-workflow-from-scratch.sh" > >(tee "${LOG_ROOT}/difc-workflow.log") 2>&1
 
 echo
 echo "=== DIFC grant summary (orders grantor) ==="

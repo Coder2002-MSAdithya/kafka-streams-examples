@@ -7,6 +7,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GrantRelationalAlgebraVerifierTest {
 
+  @org.junit.jupiter.api.AfterEach
+  void clearGrantSanitizationMode() {
+    System.clearProperty("difc.grant.sanitization.mode");
+  }
+
   @Test
   void incompleteGraphRepublicationStillDeniesOrderTag() throws Exception {
     final AppProcessingPolicy policy = AgentPolicyTestSupport.agentEnriched("""
@@ -275,6 +280,58 @@ class GrantRelationalAlgebraVerifierTest {
           }
         }
         """);
+    assertFalse(
+        GrantRelationalAlgebraVerifier.relationSanitizesTaggedInput(
+            DifcGrantPolicy.TAG_ORDER, "orders", "order-validations", policy));
+  }
+
+  @Test
+  void taintModeGrantsWithoutExpressionTreeWhenSensitiveFieldsAreSanitized() throws Exception {
+    final AppProcessingPolicy policy = AppProcessingPolicy.readFromCanonicalJson("""
+        {
+          "version": 2,
+          "relationalAlgebraAnalysis": {
+            "processingPaths": [{
+              "ingressTopic": "orders",
+              "egressTopic": "order-validations",
+              "sourceFieldTaint": [
+                {"sourceTopic":"orders","sourceField":"customerId","status":"DROPPED","sanitized":true},
+                {"sourceTopic":"orders","sourceField":"product","status":"SANITIZED_AGGREGATE","sanitized":true},
+                {"sourceTopic":"orders","sourceField":"quantity","status":"SANITIZED_WINDOWED_AGGREGATE","sanitized":true},
+                {"sourceTopic":"orders","sourceField":"price","status":"SANITIZED_BOOLEAN","sanitized":true},
+                {"sourceTopic":"orders","sourceField":"state","status":"DROPPED","sanitized":true}
+              ]
+            }]
+          }
+        }
+        """);
+    System.setProperty("difc.grant.sanitization.mode", "taint");
+    assertTrue(
+        GrantRelationalAlgebraVerifier.relationSanitizesTaggedInput(
+            DifcGrantPolicy.TAG_ORDER, "orders", "order-validations", policy));
+  }
+
+  @Test
+  void taintModeDeniesWhenAnySensitiveFieldIsUnsanitized() throws Exception {
+    final AppProcessingPolicy policy = AppProcessingPolicy.readFromCanonicalJson("""
+        {
+          "version": 2,
+          "relationalAlgebraAnalysis": {
+            "processingPaths": [{
+              "ingressTopic": "orders",
+              "egressTopic": "order-validations",
+              "sourceFieldTaint": [
+                {"sourceTopic":"orders","sourceField":"customerId","status":"DROPPED","sanitized":true},
+                {"sourceTopic":"orders","sourceField":"product","status":"SANITIZED_AGGREGATE","sanitized":true},
+                {"sourceTopic":"orders","sourceField":"quantity","status":"SANITIZED_WINDOWED_AGGREGATE","sanitized":true},
+                {"sourceTopic":"orders","sourceField":"price","status":"UNSANITIZED_PASSTHROUGH","sanitized":false},
+                {"sourceTopic":"orders","sourceField":"state","status":"DROPPED","sanitized":true}
+              ]
+            }]
+          }
+        }
+        """);
+    System.setProperty("difc.grant.sanitization.mode", "taint");
     assertFalse(
         GrantRelationalAlgebraVerifier.relationSanitizesTaggedInput(
             DifcGrantPolicy.TAG_ORDER, "orders", "order-validations", policy));

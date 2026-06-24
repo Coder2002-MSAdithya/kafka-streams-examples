@@ -9,7 +9,7 @@ digraph ra {
     label="orders → order-validations"; style=rounded; color="#adb5bd"; fontsize=10;
     p0_sink_order_validations [label="Sink(order-validations)", shape=ellipse, style="filled", fillcolor="#d4edda"];
     p0_union_1 [label="∪: union branches", shape=diamond, style="filled", fillcolor="#ffe8cc"];
-    p0_pi_mapvalues_2 [label="π: projection/map", shape=box, style="rounded,filled", fillcolor="#e8f4fc"];
+    p0_pi_orderid_2 [label="π: orderId, checkType, validationResult", shape=box, style="rounded,filled", fillcolor="#e8f4fc"];
     p0_sigma_session_order_to_3 [label="σ: session order total >= fraud limit", shape=box, style="rounded,filled", fillcolor="#e8f4fc"];
     p0_sigma_order_state_crea_4 [label="σ: order.state = CREATED", shape=box, style="rounded,filled", fillcolor="#e8f4fc"];
     p0_group_customerid [label="γ_g: group by customerId", shape=box, style="rounded,filled", fillcolor="#fff3cd"];
@@ -21,19 +21,19 @@ digraph ra {
     p0_window_6 -> p0_group_customerid;
     p0_group_customerid -> p0_sigma_order_state_crea_4;
     p0_sigma_order_state_crea_4 -> p0_sigma_session_order_to_3;
-    p0_sigma_session_order_to_3 -> p0_pi_mapvalues_2;
-    p0_pi_mapvalues_2 -> p0_union_1;
-    p0_pi_mapvalues_8 [label="π: projection/map", shape=box, style="rounded,filled", fillcolor="#e8f4fc"];
+    p0_sigma_session_order_to_3 -> p0_pi_orderid_2;
+    p0_pi_orderid_2 -> p0_union_1;
+    p0_pi_orderid_8 [label="π: orderId, checkType, validationResult", shape=box, style="rounded,filled", fillcolor="#e8f4fc"];
     p0_sigma_session_order_to_9 [label="σ: session order total < fraud limit", shape=box, style="rounded,filled", fillcolor="#e8f4fc"];
     p0_sigma_order_state_crea_4 -> p0_sigma_session_order_to_9;
-    p0_sigma_session_order_to_9 -> p0_pi_mapvalues_8;
-    p0_pi_mapvalues_8 -> p0_union_1;
-    { rank=same; p0_pi_mapvalues_2; p0_pi_mapvalues_8; }
+    p0_sigma_session_order_to_9 -> p0_pi_orderid_8;
+    p0_pi_orderid_8 -> p0_union_1;
+    { rank=same; p0_pi_orderid_2; p0_pi_orderid_8; }
     p0_union_1 -> p0_sink_order_validations;
     r0anchor [style=invis, width=0, height=0, label=""];
     p0_sink_order_validations -> r0anchor [style=invis];
     r0anchor -> r0note [style=invis];
-    r0note [label="out: checkType, orderId, validationResult\ndropped: quantity, price, product, state, customerId", shape=note, fillcolor="#f8f9fa", fontsize=10];
+    r0note [label="out: orderId, checkType, validationResult\ndropped: customerId, state, product, price, quantity", shape=note, fillcolor="#f8f9fa", fontsize=10];
     { rank=max; r0note; }
   }
 }

@@ -30,7 +30,7 @@ digraph ra {
     r0anchor [style=invis, width=0, height=0, label=""];
     p0_sink_orders -> r0anchor [style=invis];
     r0anchor -> r0note [style=invis];
-    r0note [label="out: customerId, state, id, product, price, … (+1 more)\nin: orderId, checkType, validationResult, customerId, state, … (+4 more)", shape=note, fillcolor="#f8f9fa", fontsize=10];
+    r0note [label="out: customerId, state, id, product, price, … (+1 more)\nin: validationResult, orderId, checkType, customerId, state, … (+4 more)", shape=note, fillcolor="#f8f9fa", fontsize=10];
     { rank=max; r0note; }
   }
 }

@@ -24,7 +24,7 @@ digraph ra {
     r0anchor [style=invis, width=0, height=0, label=""];
     p0_sink_order_validations -> r0anchor [style=invis];
     r0anchor -> r0note [style=invis];
-    r0note [label="out: orderId, checkType, validationResult\ndropped: quantity, product, price, customerId, state", shape=note, fillcolor="#f8f9fa", fontsize=10];
+    r0note [label="out: orderId, checkType, validationResult\ndropped: quantity, customerId, state, product, price", shape=note, fillcolor="#f8f9fa", fontsize=10];
     { rank=max; r0note; }
   }
 }

@@ -9,7 +9,7 @@ digraph ra {
     label="orders, payments, customers → orders-enriched"; style=rounded; color="#adb5bd"; fontsize=10;
     p0_sink_orders_enriched [label="Sink(orders-enriched)", shape=ellipse, style="filled", fillcolor="#d4edda"];
     p0_join_1 [label="⋈: orders, payments, customers", shape=hexagon, style="filled", fillcolor="#fff3cd"];
-    p0_stream_stream_2 [label="stream: price, product, id, state, customerId, … (+1 more)", shape=box, style="rounded,filled", fillcolor="#e8f4fc"];
+    p0_stream_stream_2 [label="stream: product, price, quantity, customerId, state, … (+1 more)", shape=box, style="rounded,filled", fillcolor="#e8f4fc"];
     p0_scan_orders [label="Scan(orders)", shape=ellipse, style="filled", fillcolor="#d4edda"];
     p0_scan_orders -> p0_stream_stream_2;
     p0_stream_stream_2 -> p0_join_1;
@@ -21,7 +21,7 @@ digraph ra {
     r0anchor [style=invis, width=0, height=0, label=""];
     p0_sink_orders_enriched -> r0anchor [style=invis];
     r0anchor -> r0note [style=invis];
-    r0note [label="out: price, product, id, state, customerId, … (+5 more)\nin: price, product, id, state, customerId, … (+5 more)", shape=note, fillcolor="#f8f9fa", fontsize=10];
+    r0note [label="out: product, price, quantity, customerId, state, … (+5 more)\nin: product, price, quantity, customerId, state, … (+5 more)", shape=note, fillcolor="#f8f9fa", fontsize=10];
     { rank=max; r0note; }
   }
 }

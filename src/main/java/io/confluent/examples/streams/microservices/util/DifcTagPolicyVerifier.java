@@ -36,12 +36,45 @@ public final class DifcTagPolicyVerifier {
     return loaded.policy();
   }
 
+  public static AppProcessingPolicy loadRequesterPolicyFromBytes(
+      final String requesterPrincipal,
+      final byte[] policyBytes) throws IOException {
+    final PolicyAttestationVerifier.LoadedAttestedPolicy loaded =
+        PolicyAttestationVerifier.loadAndVerifyAttestationFromBytes(requesterPrincipal, policyBytes);
+    if (!loaded.attestationResult().allowed()) {
+      throw new IOException(loaded.attestationResult().reason());
+    }
+    return loaded.policy();
+  }
+
   public static VerificationResult verifyAttestationAndCanRemoveOnTag(
       final String requesterPrincipal,
       final String grantorPrincipal,
       final String ownedTag) throws IOException {
+    System.out.printf(
+        "[DIFC] canRemoveCheck requester=%s grantor=%s tag=%s phase=start%n",
+        requesterPrincipal, grantorPrincipal, ownedTag);
     final PolicyAttestationVerifier.LoadedAttestedPolicy loaded =
         PolicyAttestationVerifier.loadAndVerifyAttestation(requesterPrincipal);
+    if (!loaded.attestationResult().allowed()) {
+      System.out.printf(
+          "[DIFC] canRemoveCheck requester=%s grantor=%s tag=%s phase=attestation-failed reason=\"%s\"%n",
+          requesterPrincipal, grantorPrincipal, ownedTag, loaded.attestationResult().reason());
+      return loaded.attestationResult();
+    }
+    System.out.printf(
+        "[DIFC] canRemoveCheck requester=%s grantor=%s tag=%s phase=attestation-ok%n",
+        requesterPrincipal, grantorPrincipal, ownedTag);
+    return verifyCanRemoveOnTag(ownedTag, grantorPrincipal, loaded.policy());
+  }
+
+  public static VerificationResult verifyAttestationAndCanRemoveOnTag(
+      final String requesterPrincipal,
+      final String grantorPrincipal,
+      final String ownedTag,
+      final byte[] policyBytes) throws IOException {
+    final PolicyAttestationVerifier.LoadedAttestedPolicy loaded =
+        PolicyAttestationVerifier.loadAndVerifyAttestationFromBytes(requesterPrincipal, policyBytes);
     if (!loaded.attestationResult().allowed()) {
       return loaded.attestationResult();
     }

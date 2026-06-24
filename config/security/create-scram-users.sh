@@ -24,8 +24,5 @@ create_user inventory-svc inventory-secret
 create_user order-details-svc order-details-secret
 create_user validations-agg-svc validations-agg-secret
 create_user email-svc email-secret
-create_user ms-orders-svc ms-orders-secret
-create_user ms-payment-svc ms-payment-secret
-create_user ms-stock-svc ms-stock-secret
 
 echo "SCRAM users ready."

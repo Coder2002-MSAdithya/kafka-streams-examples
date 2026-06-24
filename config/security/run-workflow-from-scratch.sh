@@ -2,15 +2,17 @@
 # Wipe, format, start cluster + microservices, seed inventory, post orders, print log summary.
 set -euo pipefail
 source "$(dirname "$0")/_env.sh"
+source "$(dirname "$0")/_cluster_ready.sh"
 cd "${SCRIPT_DIR}"
 require_standalone_jar
 
 LOG_ROOT="${LOG_ROOT:-/tmp/ms-workflow-logs}"
 mkdir -p "${LOG_ROOT}"
+: > "${LOG_ROOT}/pids.txt"
 
 kill_listeners() {
   echo "Stopping any prior demo processes on demo ports..."
-  for port in 9092 9094 9093 8081 5432; do
+  for port in 9092 9094 9096 9098 9093 8081 "${ORDERS_PORT:-5432}"; do
     if command -v fuser >/dev/null 2>&1; then
       fuser -k "${port}/tcp" 2>/dev/null || true
     fi
@@ -55,7 +57,7 @@ wait_for_kafka() {
 wait_for_orders_http() {
   local tries="${1:-90}"
   for ((n = 1; n <= tries; n++)); do
-    if ss -tln 2>/dev/null | grep -q ':5432 '; then
+    if ss -tln 2>/dev/null | grep -q ":${ORDERS_PORT:-5432} "; then
       if grep -q 'Order Service listening at:' "${LOG_ROOT}/orders-service.log" 2>/dev/null; then
         echo "OrdersService is up"
         return 0
@@ -71,6 +73,8 @@ wait_for_orders_http() {
 start_bg() {
   local name="$1"
   shift
+  mkdir -p "${LOG_ROOT}"
+  : >> "${LOG_ROOT}/pids.txt"
   local log="${LOG_ROOT}/${name}.log"
   echo "Starting ${name} -> ${log}"
   nohup "$@" >"${log}" 2>&1 &
@@ -95,9 +99,31 @@ start_bg broker-1 env KAFKA_OPTS="-Djava.security.auth.login.config=${JAAS_CONFI
   "${KAFKA_HOME}/bin/kafka-server-start.sh" "${BROKER1_CONFIG}"
 start_bg broker-2 env KAFKA_OPTS="-Djava.security.auth.login.config=${JAAS_CONFIG}" \
   "${KAFKA_HOME}/bin/kafka-server-start.sh" "${BROKER2_CONFIG}"
+start_bg broker-3 env KAFKA_OPTS="-Djava.security.auth.login.config=${JAAS_CONFIG}" \
+  "${KAFKA_HOME}/bin/kafka-server-start.sh" "${BROKER3_CONFIG}"
 wait_for_port 9092 broker-1 90
 wait_for_port 9094 broker-2 90
+wait_for_port 9096 broker-3 90
 wait_for_kafka 90
+
+ensure_schemas_topic() {
+  echo "Preparing _schemas topic (1 partition, compact) for Schema Registry..."
+  "${KAFKA_HOME}/bin/kafka-topics.sh" \
+    --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+    --command-config "${ADMIN_CONFIG}" \
+    --delete --topic _schemas >/dev/null 2>&1 || true
+  sleep 2
+  "${KAFKA_HOME}/bin/kafka-topics.sh" \
+    --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+    --command-config "${ADMIN_CONFIG}" \
+    --create \
+    --topic _schemas \
+    --partitions 1 \
+    --replication-factor "${KSE_BROKER_COUNT:-3}" \
+    --config cleanup.policy=compact
+}
+
+ensure_schemas_topic
 
 CONFLUENT_HOME="${CONFLUENT_HOME:-$(cd "${EXAMPLES_HOME}/../confluent-8.1.1" && pwd)}"
 start_bg schema-registry "${CONFLUENT_HOME}/bin/schema-registry-start" "${SCRIPT_DIR}/schema-registry.properties"
@@ -106,6 +132,7 @@ wait_for_port 8081 schema-registry 90
 echo "=== ACLs and topics ==="
 ./create-acls.sh | tee "${LOG_ROOT}/create-acls.log"
 ./create-topics.sh | tee "${LOG_ROOT}/create-topics.log"
+wait_for_cluster_ready
 
 echo "=== Starting microservices (DIFC order: orders -> validators -> aggregator) ==="
 start_bg orders-service ./start-orders-service.sh

@@ -26,9 +26,44 @@ public final class GrantRelationalAlgebraVerifier {
     if (path == null) {
       return false;
     }
+    final GrantSanitizationMode mode = GrantSanitizationMode.current();
+    final Boolean taintSanitized =
+        SourceFieldTaintVerifier.scanSanitizesTaggedInput(path, ownedTag, inputTopic, outputTopic);
+    if (mode == GrantSanitizationMode.TAINT) {
+      final boolean decision = taintSanitized != null && taintSanitized;
+      GrantLineageVerificationLog.verificationPath(
+          ownedTag, inputTopic, outputTopic, "taint-report", decision);
+      return decision;
+    }
     if (path.getExpressionTree() == null) {
+      if (mode == GrantSanitizationMode.HYBRID && taintSanitized != null) {
+        GrantLineageVerificationLog.verificationPath(
+            ownedTag, inputTopic, outputTopic, "hybrid(taint-only)", taintSanitized);
+        return taintSanitized;
+      }
       return false;
     }
+    final boolean lineageSanitized =
+        relationSanitizesByLineage(ownedTag, inputTopic, outputTopic, policy, path);
+    if (mode == GrantSanitizationMode.HYBRID && taintSanitized != null) {
+      final boolean combined = lineageSanitized && taintSanitized;
+      GrantLineageVerificationLog.verificationPath(
+          ownedTag, inputTopic, outputTopic, "hybrid(lineage+taint)", combined);
+      return combined;
+    }
+    if (mode == GrantSanitizationMode.HYBRID) {
+      GrantLineageVerificationLog.verificationPath(
+          ownedTag, inputTopic, outputTopic, "hybrid(lineage-only)", lineageSanitized);
+    }
+    return lineageSanitized;
+  }
+
+  private static boolean relationSanitizesByLineage(
+      final String ownedTag,
+      final String inputTopic,
+      final String outputTopic,
+      final AppProcessingPolicy policy,
+      final AppProcessingPolicy.ProcessingPathAnalysis path) {
     final java.util.Map<String, FieldLineage> egressLineages =
         FieldLineageEvaluator.evaluateEgressLineages(path.getExpressionTree(), outputTopic);
     GrantLineageVerificationLog.verifyingPath(
@@ -75,6 +110,17 @@ public final class GrantRelationalAlgebraVerifier {
           + ")";
     }
     final Set<String> sensitive = GrantorTagTopology.sensitiveFieldsForTaggedInput(ownedTag, inputTopic);
+    final Set<String> unsanitizedFromTaint = unsanitizedSensitiveFields(path, inputTopic, sensitive);
+    if (!unsanitizedFromTaint.isEmpty() && GrantSanitizationMode.current() != GrantSanitizationMode.LINEAGE) {
+      return "output relation "
+          + inputTopic
+          + " → "
+          + outputTopic
+          + " taint report marks grantor-sensitive fields "
+          + unsanitizedFromTaint
+          + " as unsanitized for tag "
+          + ownedTag;
+    }
     final Set<String> retainedSensitive =
         path.getExpressionTree() != null
             ? retainedSensitiveForPath(path, inputTopic, outputTopic, sensitive)
@@ -257,5 +303,31 @@ public final class GrantRelationalAlgebraVerifier {
     final Set<String> retained = new LinkedHashSet<>(path.getOutputFields());
     retained.retainAll(sensitive);
     return retained;
+  }
+
+  private static Set<String> unsanitizedSensitiveFields(
+      final AppProcessingPolicy.ProcessingPathAnalysis path,
+      final String inputTopic,
+      final Set<String> sensitive) {
+    if (path == null
+        || sensitive == null
+        || sensitive.isEmpty()
+        || path.getSourceFieldTaint() == null
+        || path.getSourceFieldTaint().isEmpty()) {
+      return Set.of();
+    }
+    final Set<String> unsanitized = new LinkedHashSet<>();
+    for (final AppProcessingPolicy.SourceFieldTaintStatus status : path.getSourceFieldTaint()) {
+      if (status == null || !inputTopic.equals(status.getSourceTopic())) {
+        continue;
+      }
+      if (!sensitive.contains(status.getSourceField())) {
+        continue;
+      }
+      if (!status.isSanitized()) {
+        unsanitized.add(status.getSourceField() + "(" + status.getStatus() + ")");
+      }
+    }
+    return unsanitized;
   }
 }

@@ -69,6 +69,50 @@ public final class DifcGrantPolicy {
         };
     }
 
+    /**
+     * Returns a human-readable English explanation for why {@code requesterPrincipal} is not
+     * on the allow-list for {@code capability} on {@code tagName}.  Used by the grantor to
+     * emit a {@code [DIFC][GRANT-DECISION]} log line that can be included in reports verbatim.
+     */
+    public static String denyExplanation(
+            final String tagName,
+            final String requesterPrincipal,
+            final Capability capability) {
+        if (capability == Capability.CAN_REMOVE) {
+            if (TAG_ORDER.equals(tagName)) {
+                if (PRINCIPAL_EMAIL.equals(requesterPrincipal)) {
+                    return PRINCIPAL_EMAIL + " reads tagged order records solely to dispatch"
+                            + " e-mail notifications and never calls declassifyTags on its"
+                            + " produce path. Granting CAN_REMOVE would allow the email service"
+                            + " to strip the 'order' tag from records without having sanitized"
+                            + " the sensitive order fields (items, orderPrice), violating the"
+                            + " declassification invariant. The DifcGrantPolicy allow-list"
+                            + " therefore excludes email-svc from the CAN_REMOVE grantee set"
+                            + " for tag 'order'.";
+                }
+                return requesterPrincipal + " is not in the CAN_REMOVE allow-list for tag"
+                        + " 'order'. Only fraud-svc, inventory-svc, order-details-svc, and"
+                        + " validations-agg-svc are authorised to produce with declassifyTags"
+                        + " on the order tag.";
+            }
+            if (TAG_FRAUD.equals(tagName) || TAG_INV_VALID.equals(tagName)
+                    || TAG_ORDER_VALID.equals(tagName)) {
+                return requesterPrincipal + " is not in the CAN_REMOVE allow-list for tag '"
+                        + tagName + "'. Only validations-agg-svc is authorised to aggregate"
+                        + " and declassify validation tags.";
+            }
+            return requesterPrincipal + " is not authorised to hold CAN_REMOVE on tag '"
+                    + tagName + "'.";
+        }
+        // CAN_ADD
+        if (TAG_ORDER.equals(tagName)) {
+            return requesterPrincipal + " is not in the CAN_ADD allow-list for tag 'order'."
+                    + " Only the validator services and the aggregator are permitted to fetch"
+                    + " tagged order records.";
+        }
+        return requesterPrincipal + " is not in the CAN_ADD allow-list for tag '" + tagName + "'.";
+    }
+
     /** Principals that consume tagged {@code orders} (including join-only services). */
     private static boolean isOrderTagReader(final String requesterPrincipal) {
         return isOrderTagDeclassifier(requesterPrincipal)

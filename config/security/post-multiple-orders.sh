@@ -5,7 +5,7 @@
 set -euo pipefail
 source "$(dirname "$0")/_env.sh"
 
-ORDER_URL="${ORDER_SERVICE_URL:-http://localhost:5432}"
+ORDER_URL="${ORDER_SERVICE_URL:-http://localhost:${ORDERS_PORT:-5432}}"
 COUNT="${1:-13}"
 TIMEOUT_MS="${ORDER_HTTP_TIMEOUT_MS:-60000}"
 

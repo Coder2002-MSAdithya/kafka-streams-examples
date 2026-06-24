@@ -20,6 +20,9 @@ policy_trusted_ca_path() {
   fi
 }
 
+export POLICY_GRANTOR_TRUSTED_CA_PATH="${POLICY_GRANTOR_TRUSTED_CA_PATH:-$(policy_trusted_ca_path)}"
+export POLICY_AGENT_TRUSTED_CA_PATH="${POLICY_AGENT_TRUSTED_CA_PATH:-${POLICY_GRANTOR_TRUSTED_CA_PATH}}"
+
 # Grantor-only JVM flags (no javaagent) for CAN_REMOVE policy attestation verification.
 grantor_policy_trust_java_opts() {
   local trusted_ca state_dir
@@ -29,13 +32,29 @@ grantor_policy_trust_java_opts() {
 -Dpolicy.grantor.trusted.ca.path=${trusted_ca}
 -Dpolicy.registry.dir=${state_dir}/policy
 -Dpolicy.agent.kafka.bootstrap=${BOOTSTRAP_SERVERS:-localhost:9092,localhost:9094}
+-Ddifc.grant.sanitization.mode=${DIFC_GRANT_SANITIZATION_MODE:-lineage}
 EOF
 }
 
-# Signed Kafka API JARs must precede the standalone fat JAR when network enforcement is enabled.
+# DIFC-patched Kafka API JARs must precede the standalone fat JAR (prefer fresh Gradle/Maven local build).
 signed_kafka_classpath() {
+  local clients="${KAFKA_HOME}/clients/build/libs/kafka-clients-4.0.0.jar"
+  local streams="${KAFKA_HOME}/streams/build/libs/kafka-streams-4.0.0.jar"
+  local m2="${HOME}/.m2/repository/org/apache/kafka"
   local signed_dir="${KAFKA_HOME}/security/policy-agent/signed-jars"
-  echo "${signed_dir}/kafka-clients-4.0.0.jar:${signed_dir}/kafka-streams-4.0.0.jar"
+  if [[ ! -f "${clients}" ]]; then
+    clients="${m2}/kafka-clients/4.0.0/kafka-clients-4.0.0.jar"
+  fi
+  if [[ ! -f "${streams}" ]]; then
+    streams="${m2}/kafka-streams/4.0.0/kafka-streams-4.0.0.jar"
+  fi
+  if [[ ! -f "${clients}" ]]; then
+    clients="${signed_dir}/kafka-clients-4.0.0.jar"
+  fi
+  if [[ ! -f "${streams}" ]]; then
+    streams="${signed_dir}/kafka-streams-4.0.0.jar"
+  fi
+  echo "${clients}:${streams}"
 }
 
 streams_agent_classpath() {
@@ -75,5 +94,7 @@ policy_agent_java_opts() {
 -Dpolicy.registry.dir=${state_dir}/policy
 -Dpolicy.dsl.json.path=${policy_dir}/processing-policy.json
 -Dpolicy.dsl.dot.path=${policy_dir}/dsl-topology.dot
+-Dpolicy.sanitization.analysis.mode=${DIFC_AGENT_SANITIZATION_MODE:-both}
+-Ddifc.grant.sanitization.mode=${DIFC_GRANT_SANITIZATION_MODE:-lineage}
 EOF
 }

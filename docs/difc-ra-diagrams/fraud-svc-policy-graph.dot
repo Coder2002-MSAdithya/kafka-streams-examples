@@ -41,8 +41,8 @@ digraph policy {
   n_op_33 [label="to", shape=box, fillcolor="#cce5ff"];
   n_topic_order_validations [label="order-validations", shape=ellipse, fillcolor="#d4edda"];
   n_internal_KSTREAM_AGGREGATE_STATE_STORE_0000000004_repartition [label="repartition\nKSTREAM-AGGREGATE-STATE-STORE-000...", shape=ellipse, fillcolor="#fff3cd"];
-  n_store_org_apache_kafka_streams_processor_internals_StoreFactory_FactoryWrappingStoreBuilder_77f4c040 [label="state store", shape=cylinder, fillcolor="#e8daef"];
-  n_store_org_apache_kafka_streams_kstream_internals_SessionStoreMaterializer_77f4c040 [label="state store", shape=cylinder, fillcolor="#e8daef"];
+  n_store_org_apache_kafka_streams_processor_internals_StoreFactory_FactoryWrappingStoreBuilder_3e377967 [label="state store", shape=cylinder, fillcolor="#e8daef"];
+  n_store_org_apache_kafka_streams_kstream_internals_SessionStoreMaterializer_3e377967 [label="state store", shape=cylinder, fillcolor="#e8daef"];
   n_comp_FraudService [label="FraudService (REST/producer)", shape=box, fillcolor="#f0f0f0"];
   n_comp_FraudService_op_0 [label="filter()", shape=box, fillcolor="#cce5ff"];
   n_comp_FraudService_op_1 [label="groupBy()", shape=box, fillcolor="#cce5ff"];
@@ -84,7 +84,7 @@ digraph policy {
   n_stream_31 -> n_op_33 [label="input"];
   n_op_33 -> n_topic_order_validations [label="writes"];
   n_stream_17 -> n_internal_KSTREAM_AGGREGATE_STATE_STORE_0000000004_repartition [label="repartition-write"];
-  n_op_10 -> n_store_org_apache_kafka_streams_processor_internals_StoreFactory_FactoryWrappingStoreBuilder_77f4c040 [label="materializes"];
+  n_op_10 -> n_store_org_apache_kafka_streams_processor_internals_StoreFactory_FactoryWrappingStoreBuilder_3e377967 [label="materializes"];
   n_topic_orders -> n_comp_FraudService [label="ingress"];
   n_topic_orders -> n_comp_FraudService_op_0 [label="source"];
   n_comp_FraudService_op_0 -> n_comp_FraudService_op_1 [label="input"];

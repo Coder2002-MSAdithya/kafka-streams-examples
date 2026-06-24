@@ -424,6 +424,10 @@ public final class AppProcessingPolicy {
     private List<String> stateStores = new ArrayList<>();
     private List<String> ingressTopics = new ArrayList<>();
     private RelationalAlgebraExpressionNode expressionTree;
+    private List<SourceFieldTaintStatus> sourceFieldTaint = new ArrayList<>();
+    private int sourceFieldCount;
+    private int sanitizedSourceFieldCount;
+    private int unsanitizedSourceFieldCount;
 
     public List<String> getIngressTopics() {
       return ingressTopics == null ? Collections.emptyList() : ingressTopics;
@@ -599,6 +603,98 @@ public final class AppProcessingPolicy {
 
     public void setStateStores(final List<String> stateStores) {
       this.stateStores = stateStores;
+    }
+
+    public List<SourceFieldTaintStatus> getSourceFieldTaint() {
+      return sourceFieldTaint == null ? Collections.emptyList() : sourceFieldTaint;
+    }
+
+    public void setSourceFieldTaint(final List<SourceFieldTaintStatus> sourceFieldTaint) {
+      this.sourceFieldTaint =
+          sourceFieldTaint == null ? new ArrayList<>() : sourceFieldTaint;
+    }
+
+    public int getSourceFieldCount() {
+      return sourceFieldCount;
+    }
+
+    public void setSourceFieldCount(final int sourceFieldCount) {
+      this.sourceFieldCount = sourceFieldCount;
+    }
+
+    public int getSanitizedSourceFieldCount() {
+      return sanitizedSourceFieldCount;
+    }
+
+    public void setSanitizedSourceFieldCount(final int sanitizedSourceFieldCount) {
+      this.sanitizedSourceFieldCount = sanitizedSourceFieldCount;
+    }
+
+    public int getUnsanitizedSourceFieldCount() {
+      return unsanitizedSourceFieldCount;
+    }
+
+    public void setUnsanitizedSourceFieldCount(final int unsanitizedSourceFieldCount) {
+      this.unsanitizedSourceFieldCount = unsanitizedSourceFieldCount;
+    }
+  }
+
+  @JsonIgnoreProperties(ignoreUnknown = true)
+  public static final class SourceFieldTaintStatus {
+    private String sourceTopic;
+    private String sourceField;
+    private String status = "";
+    private boolean sanitized;
+    private List<String> sinkFields = new ArrayList<>();
+    private List<String> sanitizationEvidence = new ArrayList<>();
+
+    public String getSourceTopic() {
+      return sourceTopic;
+    }
+
+    public void setSourceTopic(final String sourceTopic) {
+      this.sourceTopic = sourceTopic;
+    }
+
+    public String getSourceField() {
+      return sourceField;
+    }
+
+    public void setSourceField(final String sourceField) {
+      this.sourceField = sourceField;
+    }
+
+    public String getStatus() {
+      return status == null ? "" : status;
+    }
+
+    public void setStatus(final String status) {
+      this.status = status == null ? "" : status;
+    }
+
+    public boolean isSanitized() {
+      return sanitized;
+    }
+
+    public void setSanitized(final boolean sanitized) {
+      this.sanitized = sanitized;
+    }
+
+    public List<String> getSinkFields() {
+      return sinkFields == null ? Collections.emptyList() : sinkFields;
+    }
+
+    public void setSinkFields(final List<String> sinkFields) {
+      this.sinkFields = sinkFields == null ? new ArrayList<>() : sinkFields;
+    }
+
+    public List<String> getSanitizationEvidence() {
+      return sanitizationEvidence == null ? Collections.emptyList() : sanitizationEvidence;
+    }
+
+    public void setSanitizationEvidence(final List<String> sanitizationEvidence) {
+      this.sanitizationEvidence =
+          sanitizationEvidence == null ? new ArrayList<>() : sanitizationEvidence;
     }
   }
 

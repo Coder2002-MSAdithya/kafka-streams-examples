@@ -358,12 +358,21 @@ public class MicroserviceUtils {
                                         final KafkaStreams streams,
                                         final String tagName,
                                         final Capability capability) {
-    final GrantCapResponseData response = streams.requestGrantCap(tagName, capability);
+    requestDifcGrantCap(serviceName, streams, tagName, capability, null);
+  }
+
+  public static void requestDifcGrantCap(final String serviceName,
+                                        final KafkaStreams streams,
+                                        final String tagName,
+                                        final Capability capability,
+                                        final byte[] attestedPolicyBytes) {
+    final GrantCapResponseData response = streams.requestGrantCap(tagName, capability, attestedPolicyBytes);
     System.out.printf(
-        "[DIFC] requestGrantCap service=%s tag=%s capability=%s errorCode=%d message=%s%n",
+        "[DIFC] requestGrantCap service=%s tag=%s capability=%s attestedPolicyBytes=%d errorCode=%d message=%s%n",
         serviceName,
         tagName,
         capability,
+        attestedPolicyBytes == null ? 0 : attestedPolicyBytes.length,
         response.errorCode(),
         response.errorMessage());
     requireDifcOk(
@@ -400,16 +409,32 @@ public class MicroserviceUtils {
   public static void requestDifcGrantCapAddAndRemove(final String serviceName,
                                                      final KafkaStreams streams,
                                                      final String tagName) {
-    requestDifcGrantCap(serviceName, streams, tagName, Capability.CAN_ADD);
     waitForAttestedProcessingPolicy(serviceName);
-    try {
-      DifcPolicyPublisher.publishAttestedPolicyForGrant();
-    } catch (final IOException e) {
-      throw new IllegalStateException(
-          "Failed to publish attested processing policy before CAN_REMOVE on tag " + tagName, e);
-    }
-    requestDifcGrantCap(serviceName, streams, tagName, Capability.CAN_REMOVE);
+    final byte[] policyBytes = readAttestedPolicyBytes(serviceName);
+    requestDifcGrantCap(serviceName, streams, tagName, Capability.CAN_ADD, policyBytes);
+    requestDifcGrantCap(serviceName, streams, tagName, Capability.CAN_REMOVE, policyBytes);
     waitForLabelTag(serviceName, streams, tagName);
+  }
+
+  public static byte[] readAttestedPolicyBytes(final String serviceName) {
+    final String principal = System.getProperty("policy.app.principal");
+    if (principal == null || principal.isEmpty()) {
+      throw new IllegalStateException(
+          "policy.app.principal JVM property is required to attach attested policy to GRANT_CAP");
+    }
+    final Path policyPath = DifcTagPolicyVerifier.policyPathForRequester(principal);
+    try {
+      if (!Files.isRegularFile(policyPath)) {
+        throw new IllegalStateException("attested policy not found at " + policyPath);
+      }
+      final byte[] bytes = Files.readAllBytes(policyPath);
+      System.out.printf(
+          "[DIFC] attestedPolicyBytesReady service=%s principal=%s bytes=%d path=%s%n",
+          serviceName, principal, bytes.length, policyPath);
+      return bytes;
+    } catch (final IOException e) {
+      throw new IllegalStateException("failed to read attested policy at " + policyPath, e);
+    }
   }
 
   /**
@@ -482,6 +507,30 @@ public class MicroserviceUtils {
   }
 
   /**
+   * Prints a human-readable {@code [DIFC][GRANT-DECISION]} line summarising the grantor's
+   * final decision together with the English-language explanation of which check was decisive.
+   * These lines are designed to be easily greppable in workflow logs and are also included
+   * verbatim in the MTech project report.
+   */
+  private static void printGrantDecisionExplanation(
+      final String serviceName,
+      final String requester,
+      final String tagName,
+      final Capability capability,
+      final boolean granted,
+      final String explanation) {
+    System.out.printf(
+        "[DIFC][GRANT-DECISION] service=%s requester=%s tag=%s capability=%s decision=%s%n"
+            + "  Explanation: %s%n",
+        serviceName,
+        requester,
+        tagName,
+        capability,
+        granted ? "GRANTED" : "DENIED",
+        explanation);
+  }
+
+  /**
    * Grant a pending capability request (tag owner approves requester via {@code ADD_CLIENT_PRIVS})
    * when {@link DifcGrantPolicy} allows the requester/tag/capability triple.
    * Downstream services enqueue work via {@link KafkaStreams#requestGrantCap}; the tag owner polls
@@ -499,19 +548,26 @@ public class MicroserviceUtils {
       return;
     }
     final Capability capability = capabilityFromPollResponse(pending.capability());
+    System.out.printf(
+        "[DIFC] grantEval service=%s requester=%s tag=%s capability=%s phase=start%n",
+        serviceName, requester, tagName, capability);
     if (!DifcGrantPolicy.isPrincipalAllowedGrant(tagName, requester, capability)) {
       System.out.printf(
-          "[DIFC] grantDenied service=%s requester=%s tag=%s capability=%s reason=principal not allowed%n",
-          serviceName,
-          requester,
-          tagName,
-          capability);
+          "[DIFC] grantDenied service=%s requester=%s tag=%s capability=%s reason=\"principal not in allow-list for %s on %s\"%n",
+          serviceName, requester, tagName, capability, capability, tagName);
+      printGrantDecisionExplanation(serviceName, requester, tagName, capability, false,
+          "Static allow-list check: " + DifcGrantPolicy.denyExplanation(tagName, requester, capability));
       return;
     }
+    System.out.printf(
+        "[DIFC] grantEval service=%s requester=%s tag=%s capability=%s phase=allow-list-ok%n",
+        serviceName, requester, tagName, capability);
     if (capability == Capability.CAN_ADD) {
       try {
         final DifcTagPolicyVerifier.VerificationResult externalResult =
-            DifcExternalConnectionVerifier.verifyCanAdd(requester);
+            pending.attestedPolicy() != null && pending.attestedPolicy().length > 0
+                ? DifcExternalConnectionVerifier.verifyCanAdd(requester, pending.attestedPolicy())
+                : DifcExternalConnectionVerifier.verifyCanAdd(requester);
         if (!externalResult.allowed()) {
           System.out.printf(
               "[DIFC] grantDeniedExternal service=%s requester=%s tag=%s capability=%s reason=%s%n",
@@ -529,6 +585,12 @@ public class MicroserviceUtils {
             tagName,
             capability,
             externalResult.reason());
+        printGrantDecisionExplanation(serviceName, requester, tagName, capability, true,
+            "Allow-list check passed and external-connection audit verified: "
+                + externalResult.reason()
+                + ". The requester's signed attestation shows only expected network"
+                + " endpoints (Kafka brokers / Schema Registry); no unauthorized"
+                + " exfiltration paths were detected.");
       } catch (final IOException e) {
         System.out.printf(
             "[DIFC] grantExternalCheckSkipped service=%s requester=%s tag=%s capability=%s reason=%s%n",
@@ -537,13 +599,20 @@ public class MicroserviceUtils {
             tagName,
             capability,
             e.getMessage());
+        printGrantDecisionExplanation(serviceName, requester, tagName, capability, true,
+            "Allow-list check passed; external-connection audit skipped (policy file not yet"
+                + " available: " + e.getMessage()
+                + "). CAN_ADD proceeds leniently to avoid startup deadlock.");
       }
     } else if (capability == Capability.CAN_REMOVE) {
       try {
         final String grantorPrincipal = GrantorTagTopology.principalForServiceName(serviceName);
         final DifcTagPolicyVerifier.VerificationResult policyResult =
-            DifcTagPolicyVerifier.verifyAttestationAndCanRemoveOnTag(
-                requester, grantorPrincipal, tagName);
+            pending.attestedPolicy() != null && pending.attestedPolicy().length > 0
+                ? DifcTagPolicyVerifier.verifyAttestationAndCanRemoveOnTag(
+                    requester, grantorPrincipal, tagName, pending.attestedPolicy())
+                : DifcTagPolicyVerifier.verifyAttestationAndCanRemoveOnTag(
+                    requester, grantorPrincipal, tagName);
         if (!policyResult.allowed()) {
           System.out.printf(
               "[DIFC] grantDeniedPolicy service=%s requester=%s tag=%s capability=%s reason=%s%n",
@@ -552,6 +621,12 @@ public class MicroserviceUtils {
               tagName,
               capability,
               policyResult.reason());
+          printGrantDecisionExplanation(serviceName, requester, tagName, capability, false,
+              "Attested-policy (RA/taint) check failed: " + policyResult.reason()
+                  + ". The grantor verified the signed processing-policy.json exported by the"
+                  + " policy agent but found that sensitive fields associated with tag '"
+                  + tagName + "' survive into a sink topic, so declassification cannot be"
+                  + " safely permitted.");
           return;
         }
         System.out.printf(
@@ -561,6 +636,11 @@ public class MicroserviceUtils {
             tagName,
             capability,
             policyResult.reason());
+        printGrantDecisionExplanation(serviceName, requester, tagName, capability, true,
+            "Attested-policy (RA/taint) check passed: " + policyResult.reason()
+                + ". The grantor verified the signed processing-policy.json and confirmed"
+                + " that all sensitive fields of tag '" + tagName + "' are projected away"
+                + " before any sink topic; declassification is safe.");
       } catch (final IOException e) {
         System.out.printf(
             "[DIFC] grantDeniedPolicy service=%s requester=%s tag=%s capability=%s reason=%s%n",
@@ -569,6 +649,10 @@ public class MicroserviceUtils {
             tagName,
             capability,
             e.getMessage());
+        printGrantDecisionExplanation(serviceName, requester, tagName, capability, false,
+            "Policy attestation could not be loaded: " + e.getMessage()
+                + ". No signed processing-policy.json was available for the requester;"
+                + " CAN_REMOVE cannot be granted without a verifiable attestation.");
         return;
       }
     }

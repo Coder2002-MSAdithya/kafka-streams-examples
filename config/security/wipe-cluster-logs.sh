@@ -8,6 +8,8 @@ DIRS=(
   /tmp/kafka-logs-ms-sasl-controller
   /tmp/kafka-logs-ms-sasl-broker-1
   /tmp/kafka-logs-ms-sasl-broker-2
+  /tmp/kafka-logs-ms-sasl-broker-3
+  /tmp/kafka-logs-ms-sasl-broker-4
   /tmp/kafka-logs-microservices-sasl
 )
 
